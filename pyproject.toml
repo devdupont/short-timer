@@ -1,0 +1,65 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "short-timer"
+version = "0.1.0"
+description = "A programmable workout timer server: paste in a workout, get back a runnable timer."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.14"
+authors = [{ name = "Michael Dupont" }]
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "motor>=3.6",
+    "anthropic>=0.40",
+    "itsdangerous>=2.2",
+    "mcp>=1.2",
+]
+
+[project.optional-dependencies]
+scrape = ["httpx>=0.28", "beautifulsoup4>=4.12"]
+
+[project.scripts]
+short-timer-server = "short_timer.app:run"
+short-timer-mcp = "short_timer.mcp_server:run"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/short_timer"]
+
+[tool.hatch.envs.default]
+installer = "uv"
+dependencies = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "mongomock-motor>=0.0.34",
+    "respx>=0.22",
+    "httpx>=0.28",
+    "beautifulsoup4>=4.12",
+]
+
+[tool.hatch.envs.default.scripts]
+test = "pytest {args:tests}"
+serve = "uvicorn short_timer.app:app --reload {args}"
+mcp = "python -m short_timer.mcp_server {args}"
+scrape = "python scripts/scrape_workouts.py {args}"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = ["live: hits the real Anthropic API; needs a real ANTHROPIC_API_KEY"]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["short_timer"]
