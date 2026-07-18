@@ -46,8 +46,9 @@ Generate a session secret with `python -c "import secrets; print(secrets.token_u
 ### Tests and linting
 
 ```bash
-hatch run test        # pytest — mocks Mongo and the Anthropic API, no network needed
-hatch fmt             # ruff lint + format
+hatch run test         # pytest — mocks Mongo and the Anthropic API, no network needed
+hatch fmt              # ruff lint + format
+hatch run types        # mypy --strict over src/
 ```
 
 The parser tests in `tests/test_llm_parser.py` include a `live` set,

@@ -15,7 +15,7 @@ dependencies = [
     "uvicorn[standard]>=0.34",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
-    "motor>=3.6",
+    "pymongo>=4.9",
     "anthropic>=0.40",
     "itsdangerous>=2.2",
     "mcp>=1.2",
@@ -40,13 +40,21 @@ dependencies = [
     "respx>=0.22",
     "httpx>=0.28",
     "beautifulsoup4>=4.12",
+    "mypy>=1.13",
 ]
 
 [tool.hatch.envs.default.scripts]
 test = "pytest {args:tests}"
+types = "mypy {args:src}"
 serve = "uvicorn short_timer.app:app --reload {args}"
 mcp = "python -m short_timer.mcp_server {args}"
 scrape = "python scripts/scrape_workouts.py {args}"
+
+[tool.mypy]
+plugins = ["pydantic.mypy"]
+python_version = "3.14"
+strict = true
+files = ["src"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
