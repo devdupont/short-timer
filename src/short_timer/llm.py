@@ -7,9 +7,8 @@ prose we'd have to parse ourselves.
 
 from __future__ import annotations
 
-from typing import Any
-
 from anthropic import AsyncAnthropic
+from anthropic.types import ToolChoiceToolParam, ToolParam
 
 from short_timer.config import get_settings
 from short_timer.models import Workout
@@ -46,7 +45,7 @@ reading of the workout. Do not invent movements or numbers that aren't \
 implied by the text.\
 """
 
-_WORKOUT_TOOL: dict[str, Any] = {
+_WORKOUT_TOOL: ToolParam = {
     "name": "emit_workout",
     "description": "Record the structured, timer-ready form of a workout.",
     "input_schema": {
@@ -112,13 +111,14 @@ async def parse_workout_text(text: str, name_hint: str | None = None) -> Workout
     client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 
     user_content = text if not name_hint else f"Workout name: {name_hint}\n\n{text}"
+    tool_choice: ToolChoiceToolParam = {"type": "tool", "name": "emit_workout"}
 
     response = await client.messages.create(
         model=settings.anthropic_model,
         max_tokens=2048,
         system=SYSTEM_PROMPT,
         tools=[_WORKOUT_TOOL],
-        tool_choice={"type": "tool", "name": "emit_workout"},
+        tool_choice=tool_choice,
         messages=[{"role": "user", "content": user_content}],
     )
 
