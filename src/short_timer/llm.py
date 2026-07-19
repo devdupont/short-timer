@@ -42,7 +42,10 @@ push-ups, 15 air squats" nested between two 1-mile runs).
 
 Always call `emit_workout` exactly once with your best-effort structured \
 reading of the workout. Do not invent movements or numbers that aren't \
-implied by the text.\
+implied by the text. Some interval workouts (e.g. "30 seconds on, 15 \
+seconds rest") don't name a specific exercise at all — when that's the \
+case, omit the movement's `name` rather than inventing a placeholder like \
+"unknown".\
 """
 
 _WORKOUT_TOOL: ToolParam = {
@@ -58,7 +61,11 @@ _WORKOUT_TOOL: ToolParam = {
             },
             "category": {
                 "type": "string",
-                "description": "e.g. hero, girl, open, benchmark, custom.",
+                "description": (
+                    "e.g. benchmark, open, custom. Never categorize by gender — "
+                    'no "girl"/"boy" labels. Scaling differences between athletes '
+                    "belong in each movement's reps and loads, not the category."
+                ),
             },
             "mode": {
                 "type": "string",
@@ -82,14 +89,17 @@ _WORKOUT_TOOL: ToolParam = {
                             "items": {
                                 "type": "object",
                                 "properties": {
-                                    "name": {"type": "string"},
+                                    "name": {
+                                        "type": "string",
+                                        "description": "Omit if the workout doesn't name a "
+                                        "specific exercise.",
+                                    },
                                     "reps": {"type": "integer"},
                                     "distance": {"type": "string"},
                                     "calories": {"type": "integer"},
                                     "load": {"type": "string"},
                                     "notes": {"type": "string"},
                                 },
-                                "required": ["name"],
                             },
                         },
                     },

@@ -1,0 +1,794 @@
+[
+  {
+    "name": "Fran",
+    "description": "21-15-9 reps for time of Thrusters (95/65 lb) and Pull-ups",
+    "category": "benchmark",
+    "source_text": "Fran\n21-15-9 reps for time of:\nThrusters, 95/65 lb\nPull-ups",
+    "mode": "for_time",
+    "time_cap_seconds": null,
+    "rounds": null,
+    "work_seconds": null,
+    "rest_seconds": null,
+    "rep_scheme": [
+      21,
+      15,
+      9
+    ],
+    "segments": [
+      {
+        "label": null,
+        "rounds": null,
+        "rep_scheme": [
+          21,
+          15,
+          9
+        ],
+        "movements": [
+          {
+            "name": "Thruster",
+            "reps": null,
+            "distance": null,
+            "calories": null,
+            "load": "95/65 lb",
+            "notes": null
+          },
+          {
+            "name": "Pull-up",
+            "reps": null,
+            "distance": null,
+            "calories": null,
+            "load": null,
+            "notes": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "Cindy",
+    "description": "AMRAP 20 minutes: 5 Pull-ups, 10 Push-ups, 15 Air Squats",
+    "category": "benchmark",
+    "source_text": "Cindy\nAMRAP 20 minutes:\n5 Pull-ups\n10 Push-ups\n15 Air Squats",
+    "mode": "amrap",
+    "time_cap_seconds": 1200,
+    "rounds": null,
+    "work_seconds": null,
+    "rest_seconds": null,
+    "rep_scheme": null,
+    "segments": [
+      {
+        "label": null,
+        "rounds": null,
+        "rep_scheme": null,
+        "movements": [
+          {
+            "name": "Pull-ups",
+            "reps": 5,
+            "distance": null,
+            "calories": null,
+            "load": null,
+            "notes": null
+          },
+          {
+            "name": "Push-ups",
+            "reps": 10,
+            "distance": null,
+            "calories": null,
+            "load": null,
+            "notes": null
+          },
+          {
+            "name": "Air Squats",
+            "reps": 15,
+            "distance": null,
+            "calories": null,
+            "load": null,
+            "notes": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "Grace",
+    "description": "30 reps for time of Clean and Jerks at 135/95 lb",
+    "category": "benchmark",
+    "source_text": "Grace\n30 reps for time of:\nClean and Jerks, 135/95 lb",
+    "mode": "for_time",
+    "time_cap_seconds": null,
+    "rounds": null,
+    "work_seconds": null,
+    "rest_seconds": null,
+    "rep_scheme": null,
+    "segments": [
+      {
+        "label": null,
+        "rounds": null,
+        "rep_scheme": null,
+        "movements": [
+          {
+            "name": "Clean and Jerk",
+            "reps": 30,
+            "distance": null,
+            "calories": null,
+            "load": "135/95 lb",
+            "notes": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "Helen",
+    "description": "3 rounds for time of a 400m run, 21 kettlebell swings, and 12 pull-ups",
+    "category": "benchmark",
+    "source_text": "Helen\n3 rounds for time:\n400m Run\n21 Kettlebell Swings, 53/35 lb\n12 Pull-ups",
+    "mode": "for_time",
+    "time_cap_seconds": null,
+    "rounds": 3,
+    "work_seconds": null,
+    "rest_seconds": null,
+    "rep_scheme": null,
+    "segments": [
+      {
+        "label": null,
+        "rounds": null,
+        "rep_scheme": null,
+        "movements": [
+          {
+            "name": "Run",
+            "reps": null,
+            "distance": "400m",
+            "calories": null,
+            "load": null,
+            "notes": null
+          }
+        ]
+      },
+      {
+        "label": null,
+        "rounds": null,
+        "rep_scheme": null,
+        "movements": [
+          {
+            "name": "Kettlebell Swings",
+            "reps": 21,
+            "distance": null,
+            "calories": null,
+            "load": "53/35 lb",
+            "notes": null
+          }
+        ]
+      },
+      {
+        "label": null,
+        "rounds": null,
+        "rep_scheme": null,
+        "movements": [
+          {
+            "name": "Pull-ups",
+            "reps": 12,
+            "distance": null,
+            "calories": null,
+            "load": null,
+            "notes": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "Annie",
+    "description": "50-40-30-20-10 reps for time of double-unders and sit-ups",
+    "category": "benchmark",
+    "source_text": "Annie\n50-40-30-20-10 reps for time of:\nDouble-unders\nSit-ups",
+    "mode": "for_time",
+    "time_cap_seconds": null,
+    "rounds": null,
+    "work_seconds": null,
+    "rest_seconds": null,
+    "rep_scheme": [
+      50,
+      40,
+      30,
+      20,
+      10
+    ],
+    "segments": [
+      {
+        "label": null,
+        "rounds": null,
+        "rep_scheme": [
+          50,
+          40,
+          30,
+          20,
+          10
+        ],
+        "movements": [
+          {
+            "name": "Double-unders",
+            "reps": null,
+            "distance": null,
+            "calories": null,
+            "load": null,
+            "notes": null
+          },
+          {
+            "name": "Sit-ups",
+            "reps": null,
+            "distance": null,
+            "calories": null,
+            "load": null,
+            "notes": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "Diane",
+    "description": "21-15-9 reps for time of Deadlifts (225/155 lb) and Handstand Push-ups",
+    "category": "benchmark",
+    "source_text": "Diane\n21-15-9 reps for time of:\nDeadlifts, 225/155 lb\nHandstand Push-ups",
+    "mode": "for_time",
+    "time_cap_seconds": null,
+    "rounds": null,
+    "work_seconds": null,
+    "rest_seconds": null,
+    "rep_scheme": [
+      21,
+      15,
+      9
+    ],
+    "segments": [
+      {
+        "label": null,
+        "rounds": null,
+        "rep_scheme": [
+          21,
+          15,
+          9
+        ],
+        "movements": [
+          {
+            "name": "Deadlift",
+            "reps": null,
+            "distance": null,
+            "calories": null,
+            "load": "225/155 lb",
+            "notes": null
+          },
+          {
+            "name": "Handstand Push-up",
+            "reps": null,
+            "distance": null,
+            "calories": null,
+            "load": null,
+            "notes": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "Karen",
+    "description": "150 wall-ball shots for time",
+    "category": "benchmark",
+    "source_text": "Karen\n150 reps for time of:\nWall-ball Shots, 20/14 lb",
+    "mode": "for_time",
+    "time_cap_seconds": null,
+    "rounds": null,
+    "work_seconds": null,
+    "rest_seconds": null,
+    "rep_scheme": null,
+    "segments": [
+      {
+        "label": null,
+        "rounds": null,
+        "rep_scheme": null,
+        "movements": [
+          {
+            "name": "Wall-ball Shots",
+            "reps": 150,
+            "distance": null,
+            "calories": null,
+            "load": "20/14 lb",
+            "notes": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "Isabel",
+    "description": "30 reps for time of snatches at 135/95 lb",
+    "category": "benchmark",
+    "source_text": "Isabel\n30 reps for time of:\nSnatches, 135/95 lb",
+    "mode": "for_time",
+    "time_cap_seconds": null,
+    "rounds": null,
+    "work_seconds": null,
+    "rest_seconds": null,
+    "rep_scheme": null,
+    "segments": [
+      {
+        "label": null,
+        "rounds": null,
+        "rep_scheme": null,
+        "movements": [
+          {
+            "name": "Snatch",
+            "reps": 30,
+            "distance": null,
+            "calories": null,
+            "load": "135/95 lb",
+            "notes": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "Angie",
+    "description": "For time: 100 Pull-ups, 100 Push-ups, 100 Sit-ups, 100 Air Squats, completed in order",
+    "category": "benchmark",
+    "source_text": "Angie\nFor time, complete in order:\n100 Pull-ups\n100 Push-ups\n100 Sit-ups\n100 Air Squats",
+    "mode": "for_time",
+    "time_cap_seconds": null,
+    "rounds": null,
+    "work_seconds": null,
+    "rest_seconds": null,
+    "rep_scheme": null,
+    "segments": [
+      {
+        "label": null,
+        "rounds": null,
+        "rep_scheme": null,
+        "movements": [
+          {
+            "name": "Pull-up",
+            "reps": 100,
+            "distance": null,
+            "calories": null,
+            "load": null,
+            "notes": null
+          }
+        ]
+      },
+      {
+        "label": null,
+        "rounds": null,
+        "rep_scheme": null,
+        "movements": [
+          {
+            "name": "Push-up",
+            "reps": 100,
+            "distance": null,
+            "calories": null,
+            "load": null,
+            "notes": null
+          }
+        ]
+      },
+      {
+        "label": null,
+        "rounds": null,
+        "rep_scheme": null,
+        "movements": [
+          {
+            "name": "Sit-up",
+            "reps": 100,
+            "distance": null,
+            "calories": null,
+            "load": null,
+            "notes": null
+          }
+        ]
+      },
+      {
+        "label": null,
+        "rounds": null,
+        "rep_scheme": null,
+        "movements": [
+          {
+            "name": "Air Squat",
+            "reps": 100,
+            "distance": null,
+            "calories": null,
+            "load": null,
+            "notes": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "DT",
+    "description": "5 rounds for time of 12 deadlifts, 9 hang power cleans, 6 push jerks at 155/105 lb",
+    "category": "benchmark",
+    "source_text": "DT\n5 rounds for time:\n12 Deadlifts, 155/105 lb\n9 Hang Power Cleans, 155/105 lb\n6 Push Jerks, 155/105 lb",
+    "mode": "for_time",
+    "time_cap_seconds": null,
+    "rounds": 5,
+    "work_seconds": null,
+    "rest_seconds": null,
+    "rep_scheme": [
+      12,
+      9,
+      6
+    ],
+    "segments": [
+      {
+        "label": null,
+        "rounds": 5,
+        "rep_scheme": [
+          12,
+          9,
+          6
+        ],
+        "movements": [
+          {
+            "name": "Deadlift",
+            "reps": 12,
+            "distance": null,
+            "calories": null,
+            "load": "155/105 lb",
+            "notes": null
+          },
+          {
+            "name": "Hang Power Clean",
+            "reps": 9,
+            "distance": null,
+            "calories": null,
+            "load": "155/105 lb",
+            "notes": null
+          },
+          {
+            "name": "Push Jerk",
+            "reps": 6,
+            "distance": null,
+            "calories": null,
+            "load": "155/105 lb",
+            "notes": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "Murph",
+    "description": "Hero WOD: 1 mile run, 100 pull-ups, 200 push-ups, 300 air squats, 1 mile run. Partition the middle reps as needed; wear a 20lb vest if available.",
+    "category": "benchmark",
+    "source_text": "Murph\nFor time:\n1 mile Run\n100 Pull-ups\n200 Push-ups\n300 Air Squats\n1 mile Run\n\nPartition the pull-ups, push-ups, and squats as needed. Start and finish with a mile run. If you've got a twenty pound vest or body armor, wear it.",
+    "mode": "for_time",
+    "time_cap_seconds": null,
+    "rounds": null,
+    "work_seconds": null,
+    "rest_seconds": null,
+    "rep_scheme": null,
+    "segments": [
+      {
+        "label": "Opening Run",
+        "rounds": null,
+        "rep_scheme": null,
+        "movements": [
+          {
+            "name": "Run",
+            "reps": null,
+            "distance": "1 mile",
+            "calories": null,
+            "load": null,
+            "notes": null
+          }
+        ]
+      },
+      {
+        "label": "Bodyweight Chipper",
+        "rounds": 20,
+        "rep_scheme": null,
+        "movements": [
+          {
+            "name": "Pull-ups",
+            "reps": 5,
+            "distance": null,
+            "calories": null,
+            "load": null,
+            "notes": null
+          },
+          {
+            "name": "Push-ups",
+            "reps": 10,
+            "distance": null,
+            "calories": null,
+            "load": null,
+            "notes": null
+          },
+          {
+            "name": "Air Squats",
+            "reps": 15,
+            "distance": null,
+            "calories": null,
+            "load": null,
+            "notes": null
+          }
+        ]
+      },
+      {
+        "label": "Closing Run",
+        "rounds": null,
+        "rep_scheme": null,
+        "movements": [
+          {
+            "name": "Run",
+            "reps": null,
+            "distance": "1 mile",
+            "calories": null,
+            "load": null,
+            "notes": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "Nancy",
+    "description": "5 rounds for time: 400m Run, 15 Overhead Squats (95/65 lb)",
+    "category": "benchmark",
+    "source_text": "Nancy\n5 rounds for time:\n400m Run\n15 Overhead Squats, 95/65 lb",
+    "mode": "for_time",
+    "time_cap_seconds": null,
+    "rounds": 5,
+    "work_seconds": null,
+    "rest_seconds": null,
+    "rep_scheme": null,
+    "segments": [
+      {
+        "label": null,
+        "rounds": null,
+        "rep_scheme": null,
+        "movements": [
+          {
+            "name": "Run",
+            "reps": null,
+            "distance": "400m",
+            "calories": null,
+            "load": null,
+            "notes": null
+          },
+          {
+            "name": "Overhead Squat",
+            "reps": 15,
+            "distance": null,
+            "calories": null,
+            "load": "95/65 lb",
+            "notes": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "Jackie",
+    "description": "For time: 1000m Row, 50 Thrusters (45 lb), 30 Pull-ups",
+    "category": "benchmark",
+    "source_text": "Jackie\nFor time:\n1000m Row\n50 Thrusters, 45 lb\n30 Pull-ups",
+    "mode": "for_time",
+    "time_cap_seconds": null,
+    "rounds": null,
+    "work_seconds": null,
+    "rest_seconds": null,
+    "rep_scheme": null,
+    "segments": [
+      {
+        "label": null,
+        "rounds": null,
+        "rep_scheme": null,
+        "movements": [
+          {
+            "name": "Row",
+            "reps": null,
+            "distance": "1000m",
+            "calories": null,
+            "load": null,
+            "notes": null
+          }
+        ]
+      },
+      {
+        "label": null,
+        "rounds": null,
+        "rep_scheme": null,
+        "movements": [
+          {
+            "name": "Thrusters",
+            "reps": 50,
+            "distance": null,
+            "calories": null,
+            "load": "45 lb",
+            "notes": null
+          }
+        ]
+      },
+      {
+        "label": null,
+        "rounds": null,
+        "rep_scheme": null,
+        "movements": [
+          {
+            "name": "Pull-ups",
+            "reps": 30,
+            "distance": null,
+            "calories": null,
+            "load": null,
+            "notes": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "Chelsea",
+    "description": "EMOM for 30 minutes: 5 pull-ups, 10 push-ups, 15 air squats each minute",
+    "category": "benchmark",
+    "source_text": "Chelsea\nEvery minute on the minute for 30 minutes:\n5 Pull-ups\n10 Push-ups\n15 Air Squats",
+    "mode": "emom",
+    "time_cap_seconds": 1800,
+    "rounds": 30,
+    "work_seconds": 60,
+    "rest_seconds": 0,
+    "rep_scheme": null,
+    "segments": [
+      {
+        "label": "Each minute",
+        "rounds": null,
+        "rep_scheme": null,
+        "movements": [
+          {
+            "name": "Pull-ups",
+            "reps": 5,
+            "distance": null,
+            "calories": null,
+            "load": null,
+            "notes": null
+          },
+          {
+            "name": "Push-ups",
+            "reps": 10,
+            "distance": null,
+            "calories": null,
+            "load": null,
+            "notes": null
+          },
+          {
+            "name": "Air Squats",
+            "reps": 15,
+            "distance": null,
+            "calories": null,
+            "load": null,
+            "notes": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "Tabata This",
+    "description": "Tabata intervals (20s work/10s rest x8) on pull-ups, push-ups, sit-ups, and air squats, with 1 minute rest between movements. Score is sum of lowest round reps per movement.",
+    "category": "benchmark",
+    "source_text": "Tabata This\nTabata (20 seconds of work, 10 seconds of rest, for 8 rounds) on each of the following, resting exactly 1 minute between movements:\nPull-ups\nPush-ups\nSit-ups\nAir Squats\n\nScore is the sum of the lowest number of reps completed in any round of each movement.",
+    "mode": "tabata",
+    "time_cap_seconds": null,
+    "rounds": 8,
+    "work_seconds": 20,
+    "rest_seconds": 10,
+    "rep_scheme": null,
+    "segments": [
+      {
+        "label": "Pull-ups",
+        "rounds": 8,
+        "rep_scheme": null,
+        "movements": [
+          {
+            "name": "Pull-ups",
+            "reps": null,
+            "distance": null,
+            "calories": null,
+            "load": null,
+            "notes": null
+          }
+        ]
+      },
+      {
+        "label": "Rest between movements",
+        "rounds": null,
+        "rep_scheme": null,
+        "movements": [
+          {
+            "name": null,
+            "reps": null,
+            "distance": null,
+            "calories": null,
+            "load": null,
+            "notes": "Rest 1 minute"
+          }
+        ]
+      },
+      {
+        "label": "Push-ups",
+        "rounds": 8,
+        "rep_scheme": null,
+        "movements": [
+          {
+            "name": "Push-ups",
+            "reps": null,
+            "distance": null,
+            "calories": null,
+            "load": null,
+            "notes": null
+          }
+        ]
+      },
+      {
+        "label": "Rest between movements",
+        "rounds": null,
+        "rep_scheme": null,
+        "movements": [
+          {
+            "name": null,
+            "reps": null,
+            "distance": null,
+            "calories": null,
+            "load": null,
+            "notes": "Rest 1 minute"
+          }
+        ]
+      },
+      {
+        "label": "Sit-ups",
+        "rounds": 8,
+        "rep_scheme": null,
+        "movements": [
+          {
+            "name": "Sit-ups",
+            "reps": null,
+            "distance": null,
+            "calories": null,
+            "load": null,
+            "notes": null
+          }
+        ]
+      },
+      {
+        "label": "Rest between movements",
+        "rounds": null,
+        "rep_scheme": null,
+        "movements": [
+          {
+            "name": null,
+            "reps": null,
+            "distance": null,
+            "calories": null,
+            "load": null,
+            "notes": "Rest 1 minute"
+          }
+        ]
+      },
+      {
+        "label": "Air Squats",
+        "rounds": 8,
+        "rep_scheme": null,
+        "movements": [
+          {
+            "name": "Air Squats",
+            "reps": null,
+            "distance": null,
+            "calories": null,
+            "load": null,
+            "notes": null
+          }
+        ]
+      }
+    ]
+  }
+]

@@ -14,7 +14,9 @@ import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from short_timer.dedup import source_hash
 
 
 class WorkoutMode(StrEnum):
@@ -29,9 +31,14 @@ class WorkoutMode(StrEnum):
 
 
 class Movement(BaseModel):
-    """A single exercise within a segment."""
+    """A single exercise within a segment.
 
-    name: str
+    `name` is optional because some interval workouts don't name a movement
+    at all (e.g. "30 seconds on, 15 seconds rest" with no exercise
+    specified) — the clock still needs a work/rest leg to run against.
+    """
+
+    name: str | None = None
     reps: int | None = None
     distance: str | None = None
     calories: int | None = None
@@ -61,6 +68,12 @@ class Workout(BaseModel):
     description: str | None = None
     category: str | None = None
     source_text: str | None = None
+    # Normalized hash of `source_text`, used to dedupe parses and skip
+    # redundant LLM calls. Auto-derived below when source_text is present.
+    source_hash: str | None = None
+    # Who this workout belongs to. Server-assigned from the session on every
+    # write — never trusted from the request body.
+    owner_id: str | None = None
     mode: WorkoutMode
 
     time_cap_seconds: int | None = None
@@ -74,6 +87,12 @@ class Workout(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
+    @model_validator(mode="after")
+    def _populate_source_hash(self) -> Workout:
+        if self.source_text and not self.source_hash:
+            self.source_hash = source_hash(self.source_text)
+        return self
+
 
 class WorkoutParseRequest(BaseModel):
     text: str
@@ -82,6 +101,13 @@ class WorkoutParseRequest(BaseModel):
 
 class WorkoutCreateRequest(BaseModel):
     workout: Workout
+
+
+class SeedResponse(BaseModel):
+    """Outcome of seeding the benchmark workouts into the library."""
+
+    added: int
+    skipped: int
 
 
 class LoginRequest(BaseModel):

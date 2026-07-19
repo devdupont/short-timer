@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useTimerEngine } from "../hooks/useTimerEngine";
 import type { Workout } from "../types";
 import { MODE_LABELS } from "../types";
@@ -11,26 +12,139 @@ function formatClock(totalSeconds: number): string {
 
 export function TimerView({ workout }: { workout: Workout }) {
   const { state, controls } = useTimerEngine(workout);
+  // "TV mode": the timer takes over the whole screen with oversized elements
+  // so it reads from across a gym. It also requests true browser fullscreen
+  // when available, but the CSS layout is the source of truth so it still
+  // works where the Fullscreen API is blocked (e.g. embedded previews).
+  const [tv, setTv] = useState(false);
 
-  const bigNumber =
-    state.remainingSeconds !== null ? formatClock(state.remainingSeconds) : formatClock(state.elapsedSeconds);
+  useEffect(() => {
+    function onFullscreenChange() {
+      // Leaving fullscreen (e.g. via Esc) should drop TV mode too.
+      if (!document.fullscreenElement) setTv(false);
+    }
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFullscreenChange);
+      if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+    };
+  }, []);
+
+  function toggleTv() {
+    const next = !tv;
+    setTv(next);
+    try {
+      if (next) {
+        document.documentElement.requestFullscreen?.().catch(() => {});
+      } else if (document.fullscreenElement) {
+        document.exitFullscreen?.().catch(() => {});
+      }
+    } catch {
+      /* Fullscreen unavailable — CSS TV mode still applies. */
+    }
+  }
+
+  const counting = state.status === "countdown";
+  // During the lead-in the clock shows a bare seconds count, not mm:ss.
+  const bigNumber = counting
+    ? String(Math.max(0, Math.ceil(state.countdownRemaining ?? 0)))
+    : state.remainingSeconds !== null
+      ? formatClock(state.remainingSeconds)
+      : formatClock(state.elapsedSeconds);
+
+  const roundPct = state.totalRounds
+    ? (Math.min(state.round, state.totalRounds) / state.totalRounds) * 100
+    : 0;
+
+  const legPct = state.totalLegs ? ((state.legNumber ?? 0) / state.totalLegs) * 100 : 0;
+
+  const timePct = state.capSeconds
+    ? Math.min(100, (state.elapsedSeconds / state.capSeconds) * 100)
+    : 0;
+
+  const segmentLines = workout.segments
+    .map((segment) => ({
+      segment,
+      movementText: segment.movements
+        .map((m) => [m.reps, m.name, m.distance, m.load].filter(Boolean).join(" "))
+        .filter(Boolean)
+        .join(", "),
+    }))
+    .filter(({ segment, movementText }) => segment.label || segment.rounds || movementText);
 
   return (
-    <div className="panel timer-view">
-      <h2>{workout.name}</h2>
-      <p className="mode-badge">{MODE_LABELS[workout.mode]}</p>
+    <div className={`timer-view ${tv ? "tv" : ""}`}>
+      <div className="timer-toolbar">
+        <button
+          className="tv-toggle"
+          onClick={toggleTv}
+          aria-pressed={tv}
+          title={tv ? "Exit full-screen display" : "Fill the screen for a wall display"}
+        >
+          {tv ? "✕ Exit" : "⛶ Fill screen"}
+        </button>
+      </div>
 
-      <div className={`clock ${state.phase} ${state.overCap ? "over-cap" : ""}`}>{bigNumber}</div>
+      <div className="timer-header">
+        <h2>{workout.name}</h2>
+        <p className="mode-badge">{MODE_LABELS[workout.mode]}</p>
+      </div>
 
-      {state.totalRounds && (
-        <p className="round-indicator">
-          Round {Math.min(state.round, state.totalRounds)} / {state.totalRounds} — {state.phase}
-        </p>
+      {counting && <p className="phase-label phase-countdown">Get ready</p>}
+      {state.status !== "idle" && !counting && (
+        <p className={`phase-label phase-${state.phase}`}>{state.phase}</p>
       )}
+
+      <div
+        className={`clock ${counting ? "countdown" : state.phase} ${
+          state.overCap && !counting ? "over-cap" : ""
+        }`}
+      >
+        {bigNumber}
+      </div>
+
+      {state.currentMovement && <p className="current-movement">{state.currentMovement}</p>}
+
       {state.overCap && <p className="error">Time cap reached</p>}
+
+      {state.capSeconds != null && (
+        <div
+          className="time-bar"
+          aria-label={`Time elapsed toward ${formatClock(state.capSeconds)} cap`}
+        >
+          <div className="time-track">
+            <div
+              className={`time-fill ${state.overCap ? "over-cap" : ""}`}
+              style={{ width: `${timePct}%` }}
+            />
+          </div>
+          <span className="time-cap-label">{formatClock(state.capSeconds)}</span>
+        </div>
+      )}
+
+      {state.totalLegs != null && (
+        <div className="leg-bar" aria-label={`Movement ${state.legNumber} of ${state.totalLegs}`}>
+          <span className="leg-number">{state.legNumber}</span>
+          <div className="leg-track">
+            <div className="leg-fill" style={{ width: `${legPct}%` }} />
+          </div>
+          <span className="leg-number leg-total">{state.totalLegs}</span>
+        </div>
+      )}
+
+      {state.totalRounds != null && (
+        <div className="round-bar" aria-label={`Round ${state.round} of ${state.totalRounds}`}>
+          <span className="round-number">{Math.min(state.round, state.totalRounds)}</span>
+          <div className="round-track">
+            <div className="round-fill" style={{ width: `${roundPct}%` }} />
+          </div>
+          <span className="round-number round-total">{state.totalRounds}</span>
+        </div>
+      )}
 
       <div className="timer-controls">
         {state.status === "idle" && <button onClick={controls.start}>Start</button>}
+        {counting && <button onClick={controls.skipCountdown}>Skip countdown</button>}
         {state.status === "running" && <button onClick={controls.pause}>Pause</button>}
         {state.status === "paused" && <button onClick={controls.resume}>Resume</button>}
         {(state.status === "running" || state.status === "paused") && (
@@ -40,17 +154,17 @@ export function TimerView({ workout }: { workout: Workout }) {
         <button onClick={controls.reset}>Reset</button>
       </div>
 
-      <ol className="segment-list">
-        {workout.segments.map((segment, i) => (
-          <li key={i}>
-            {segment.label && <strong>{segment.label}: </strong>}
-            {segment.rounds && <em>{segment.rounds} rounds — </em>}
-            {segment.movements
-              .map((m) => [m.reps, m.name, m.distance, m.load].filter(Boolean).join(" "))
-              .join(", ")}
-          </li>
-        ))}
-      </ol>
+      {segmentLines.length > 0 && (
+        <ol className="segment-list">
+          {segmentLines.map(({ segment, movementText }, i) => (
+            <li key={i}>
+              {segment.label && <strong>{segment.label}: </strong>}
+              {segment.rounds && <em>{segment.rounds} rounds — </em>}
+              {movementText}
+            </li>
+          ))}
+        </ol>
+      )}
     </div>
   );
 }
