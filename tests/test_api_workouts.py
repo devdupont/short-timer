@@ -201,6 +201,46 @@ async def test_another_owners_workout_is_invisible(
     assert parsed.json()["id"] != "not-mine"
 
 
+async def test_loading_a_prewarmed_wod_costs_no_llm_call(
+    authed_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A WOD parsed by the daily task is cloned, not re-parsed, per user."""
+    from short_timer.db import get_wod_cache_collection
+
+    text = "50-40-30-20-10 reps for time of:\nDouble-unders\nSit-ups"
+    await get_wod_cache_collection().insert_one(
+        {
+            "_id": "2026-07-19",
+            "date": "2026-07-19",
+            "title": "Sunday 260719",
+            "text": text,
+            "url": "https://www.crossfit.com/260719",
+            "source_hash": source_hash(text),
+            "parsed": {
+                "name": "Sunday 260719",
+                "mode": "for_time",
+                "segments": [],
+                "source_text": text,
+            },
+        }
+    )
+
+    async def exploding_parse(text: str, name_hint: str | None = None) -> Workout:
+        raise AssertionError("a pre-parsed WOD must not hit the model")
+
+    monkeypatch.setattr("short_timer.routers.workouts.parse_workout_text", exploding_parse)
+
+    saved = await authed_client.post("/api/workouts/from-text", json={"text": text})
+    assert saved.status_code == 201
+    assert saved.json()["name"] == "Sunday 260719"
+
+    # Saved into this owner's library, and repeat loads stay free.
+    listed = await authed_client.get("/api/workouts")
+    assert len(listed.json()) == 1
+    again = await authed_client.post("/api/workouts/from-text", json={"text": text})
+    assert again.json()["id"] == saved.json()["id"]
+
+
 async def test_seed_benchmarks_is_idempotent(authed_client: AsyncClient) -> None:
     first = await authed_client.post("/api/workouts/seed")
     assert first.status_code == 200

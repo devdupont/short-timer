@@ -13,6 +13,7 @@ from short_timer.models import (
     WorkoutCreateRequest,
     WorkoutParseRequest,
 )
+from short_timer.wod_cache import find_parsed_workout
 
 router = APIRouter(
     prefix="/api/workouts", tags=["workouts"], dependencies=[Depends(require_session)]
@@ -45,10 +46,18 @@ async def _find_by_source_text(text: str, owner_id: str) -> Workout | None:
 
 
 async def _parse_or_cached(text: str, name_hint: str | None, owner_id: str) -> Workout:
-    """Parse `text` into a Workout, reusing a saved match to avoid an LLM call."""
+    """Parse `text` into a Workout, reusing any existing parse to avoid an LLM call.
+
+    Checked in order: this owner's own library, then the shared pool of
+    pre-parsed crossfit.com WODs (so the first user to load a day's workout
+    doesn't pay for a parse either), and only then the model.
+    """
     cached = await _find_by_source_text(text, owner_id)
     if cached is not None:
         return cached
+    shared = await find_parsed_workout(text)
+    if shared is not None:
+        return shared
     try:
         return await parse_workout_text(text, name_hint=name_hint)
     except WorkoutParseError as exc:

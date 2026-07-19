@@ -9,7 +9,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from short_timer.config import get_settings
 from short_timer.db import backfill_owner_ids, backfill_source_hashes, ensure_indexes
 from short_timer.routers import auth, wods, workouts
-from short_timer.wod_cache import REFRESH_INTERVAL_SECONDS, refresh_wod_cache
+from short_timer.wod_cache import (
+    REFRESH_INTERVAL_SECONDS,
+    backfill_wod_source_hashes,
+    ensure_wods_parsed,
+    refresh_wod_cache,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +24,10 @@ async def _refresh_wods_daily() -> None:
     while True:
         try:
             await refresh_wod_cache()
+            # Parse each day once here rather than per user on first load.
+            # Runs even when the fetch was skipped as fresh, so a day that
+            # failed to parse earlier gets another attempt.
+            await ensure_wods_parsed()
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 - never let a bad fetch kill the loop
@@ -34,9 +43,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await ensure_indexes()
         hashes = await backfill_source_hashes()
         owners = await backfill_owner_ids()
-        if hashes or owners:
+        wod_hashes = await backfill_wod_source_hashes()
+        if hashes or owners or wod_hashes:
             logger.info(
-                "Backfilled source_hash on %d and owner_id on %d workout(s).", hashes, owners
+                "Backfilled source_hash on %d workout(s), owner_id on %d, "
+                "and source_hash on %d cached WOD(s).",
+                hashes,
+                owners,
+                wod_hashes,
             )
     except Exception:  # noqa: BLE001 - startup maintenance is non-critical
         logger.exception("Skipped startup database maintenance.")

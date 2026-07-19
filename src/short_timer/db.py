@@ -41,6 +41,8 @@ async def ensure_indexes() -> None:
     await get_workouts_collection().create_index([("owner_id", 1), ("source_hash", 1)])
     await get_workouts_collection().create_index("owner_id")
     await get_wod_cache_collection().create_index("date")
+    # Shared pre-parsed WODs are looked up by the hash of their source text.
+    await get_wod_cache_collection().create_index("source_hash")
 
 
 async def backfill_source_hashes() -> int:
