@@ -3,11 +3,18 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 
-from fastapi import FastAPI
+from fastapi import FastAPI, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from short_timer.config import get_settings
-from short_timer.db import backfill_owner_ids, backfill_source_hashes, ensure_indexes
+from short_timer.db import (
+    backfill_owner_ids,
+    backfill_source_hashes,
+    ensure_indexes,
+    get_database,
+)
+from short_timer.errors import register_error_handlers
 from short_timer.routers import auth, wods, workouts
 from short_timer.parse_cache import (
     backfill_parse_sources,
@@ -103,6 +110,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+register_error_handlers(app)
+
 app.include_router(auth.router)
 app.include_router(workouts.router)
 app.include_router(wods.router)
@@ -110,7 +119,27 @@ app.include_router(wods.router)
 
 @app.get("/api/health")
 async def health() -> dict[str, str]:
+    """Liveness only — the process is up and serving."""
     return {"status": "ok"}
+
+
+@app.get("/api/ready")
+async def ready() -> JSONResponse:
+    """Readiness — checks the dependency the app can't serve without.
+
+    Separate from /health so a platform restarts the container on a genuine
+    hang, but merely stops routing traffic when the database is briefly
+    unreachable.
+    """
+    try:
+        await get_database().command("ping")
+    except Exception:  # noqa: BLE001 - any failure means "not ready"
+        logger.exception("Readiness check failed.")
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"status": "unavailable", "database": "unreachable"},
+        )
+    return JSONResponse(content={"status": "ok", "database": "ok"})
 
 
 def run() -> None:
