@@ -13,7 +13,7 @@ from short_timer.models import (
     WorkoutCreateRequest,
     WorkoutParseRequest,
 )
-from short_timer.wod_cache import find_parsed_workout
+from short_timer.parse_cache import find_parse, remember_parse
 
 router = APIRouter(
     prefix="/api/workouts", tags=["workouts"], dependencies=[Depends(require_session)]
@@ -48,20 +48,23 @@ async def _find_by_source_text(text: str, owner_id: str) -> Workout | None:
 async def _parse_or_cached(text: str, name_hint: str | None, owner_id: str) -> Workout:
     """Parse `text` into a Workout, reusing any existing parse to avoid an LLM call.
 
-    Checked in order: this owner's own library, then the shared pool of
-    pre-parsed crossfit.com WODs (so the first user to load a day's workout
-    doesn't pay for a parse either), and only then the model.
+    Checked in order: this owner's own library, then the shared pool of parses
+    anyone has already paid for (including pre-warmed crossfit.com WODs), and
+    only then the model. A fresh parse is added to the pool so the next user
+    with the same text gets it for free.
     """
     cached = await _find_by_source_text(text, owner_id)
     if cached is not None:
         return cached
-    shared = await find_parsed_workout(text)
+    shared = await find_parse(text)
     if shared is not None:
         return shared
     try:
-        return await parse_workout_text(text, name_hint=name_hint)
+        workout = await parse_workout_text(text, name_hint=name_hint)
     except WorkoutParseError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    await remember_parse(workout)
+    return workout
 
 
 @router.post("/parse", response_model=Workout)

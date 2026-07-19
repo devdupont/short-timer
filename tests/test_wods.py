@@ -9,11 +9,10 @@ from short_timer import crossfit
 from short_timer.app import app
 from short_timer.crossfit import fetch_wod
 from short_timer.models import Workout, WorkoutMode
+from short_timer.parse_cache import find_parse, migrate_wod_parses
 from short_timer.wod_cache import (
     CACHE_DAYS,
-    backfill_wod_source_hashes,
     ensure_wods_parsed,
-    find_parsed_workout,
     get_wods,
     read_cached_wods,
     refresh_wod_cache,
@@ -97,9 +96,9 @@ async def test_wods_are_parsed_once_and_shared(monkeypatch: pytest.MonkeyPatch) 
     assert calls == parses_after_prewarm
 
     # And the shared parse is available to clone, with its own fresh id.
-    shared = await find_parsed_workout(_WOD_JSON["wods"]["wodRaw"])
+    shared = await find_parse(_WOD_JSON["wods"]["wodRaw"])
     assert shared is not None
-    again = await find_parsed_workout(_WOD_JSON["wods"]["wodRaw"])
+    again = await find_parse(_WOD_JSON["wods"]["wodRaw"])
     assert again is not None and again.id != shared.id
     assert calls == parses_after_prewarm
 
@@ -156,8 +155,8 @@ async def test_refetch_preserves_parse_but_stale_text_invalidates_it(
     assert calls > first_pass
 
 
-async def test_backfill_restores_shared_parse_lookup() -> None:
-    """A cache row predating source_hash must not silently defeat sharing."""
+async def test_existing_wod_parses_migrate_into_the_pool() -> None:
+    """Parses stored on WOD documents move across rather than being re-paid for."""
     from short_timer.db import get_wod_cache_collection
 
     text = "21-15-9 reps for time of:\nThrusters\nPull-ups"
@@ -168,15 +167,19 @@ async def test_backfill_restores_shared_parse_lookup() -> None:
             "title": "Legacy row",
             "text": text,
             "url": "https://www.crossfit.com/260718",
-            # No source_hash: written before the field was introduced.
             "parsed": {"name": "Legacy", "mode": "for_time", "segments": [], "source_text": text},
         }
     )
 
-    assert await find_parsed_workout(text) is None  # lookup misses
-    assert await backfill_wod_source_hashes() == 1
-    found = await find_parsed_workout(text)
+    assert await find_parse(text) is None
+    assert await migrate_wod_parses() == 1
+    found = await find_parse(text)
     assert found is not None and found.name == "Legacy"
+
+    # Idempotent, and the old copy is cleared so there's one source of truth.
+    assert await migrate_wod_parses() == 0
+    doc = await get_wod_cache_collection().find_one({"_id": "2026-07-18"})
+    assert doc is not None and "parsed" not in doc
 
 
 @respx.mock

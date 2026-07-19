@@ -35,14 +35,18 @@ def get_wod_cache_collection() -> AsyncCollection[dict[str, Any]]:
     return get_database()["wod_cache"]
 
 
+def get_parse_cache_collection() -> AsyncCollection[dict[str, Any]]:
+    """Shared pool of parsed workouts, keyed by source-text hash (`_id`)."""
+    return get_database()["parse_cache"]
+
+
 async def ensure_indexes() -> None:
     """Index the fields every hot query filters on."""
     # Dedup lookups are always scoped to an owner, so index the pair.
     await get_workouts_collection().create_index([("owner_id", 1), ("source_hash", 1)])
     await get_workouts_collection().create_index("owner_id")
     await get_wod_cache_collection().create_index("date")
-    # Shared pre-parsed WODs are looked up by the hash of their source text.
-    await get_wod_cache_collection().create_index("source_hash")
+    # parse_cache is keyed by source hash as its _id, so it needs no extra index.
 
 
 async def backfill_source_hashes() -> int:

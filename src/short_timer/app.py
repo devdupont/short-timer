@@ -9,9 +9,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from short_timer.config import get_settings
 from short_timer.db import backfill_owner_ids, backfill_source_hashes, ensure_indexes
 from short_timer.routers import auth, wods, workouts
+from short_timer.parse_cache import migrate_wod_parses
 from short_timer.wod_cache import (
     REFRESH_INTERVAL_SECONDS,
-    backfill_wod_source_hashes,
     ensure_wods_parsed,
     refresh_wod_cache,
 )
@@ -43,14 +43,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await ensure_indexes()
         hashes = await backfill_source_hashes()
         owners = await backfill_owner_ids()
-        wod_hashes = await backfill_wod_source_hashes()
-        if hashes or owners or wod_hashes:
+        moved = await migrate_wod_parses()
+        if hashes or owners or moved:
             logger.info(
                 "Backfilled source_hash on %d workout(s), owner_id on %d, "
-                "and source_hash on %d cached WOD(s).",
+                "and moved %d WOD parse(s) into the shared pool.",
                 hashes,
                 owners,
-                wod_hashes,
+                moved,
             )
     except Exception:  # noqa: BLE001 - startup maintenance is non-critical
         logger.exception("Skipped startup database maintenance.")

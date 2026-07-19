@@ -1,0 +1,98 @@
+"""Shared pool of parsed workouts, keyed by normalized source text.
+
+Parsing costs an LLM call, and the same workout text turns up across many
+users — today's crossfit.com WOD most obviously, but also benchmarks and
+whiteboard workouts people paste independently. Recording each distinct parse
+once means the model is called once per distinct *workout*, not once per user.
+
+The pool is deliberately immutable and separate from users' libraries. A user
+who loads a workout gets their own copy to rename, cap, and edit freely; those
+edits never flow back here. Copying another user's *record* would push their
+customizations onto everyone else who pastes the same text — this shares only
+the neutral parse.
+
+Nothing here is private: an entry is only ever returned to someone who already
+holds the identical source text.
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import UTC, datetime
+
+from short_timer.db import get_parse_cache_collection
+from short_timer.dedup import source_hash
+from short_timer.models import Workout
+
+logger = logging.getLogger(__name__)
+
+#: Server-managed fields; each copy gets its own id, owner, and timestamps.
+_DROPPED_FIELDS = ("id", "created_at", "updated_at", "owner_id", "source_hash")
+
+
+def _payload(workout: Workout) -> dict[str, object]:
+    data = workout.model_dump(mode="json")
+    for field in _DROPPED_FIELDS:
+        data.pop(field, None)
+    return data
+
+
+async def remember_parse(workout: Workout) -> bool:
+    """Record a fresh parse so any user with the same text can reuse it."""
+    if not workout.source_text:
+        return False
+    digest = source_hash(workout.source_text)
+    await get_parse_cache_collection().update_one(
+        {"_id": digest},
+        {
+            "$set": {"source_hash": digest, "parsed": _payload(workout)},
+            "$setOnInsert": {"created_at": datetime.now(UTC)},
+        },
+        upsert=True,
+    )
+    return True
+
+
+async def find_parse(text: str) -> Workout | None:
+    """A previously-parsed workout for this text, as a fresh unsaved Workout."""
+    doc = await get_parse_cache_collection().find_one({"_id": source_hash(text)})
+    if doc is None:
+        return None
+    parsed = doc.get("parsed")
+    if not isinstance(parsed, dict):
+        return None
+    # Rebuilt through the model so the copy gets its own id and timestamps.
+    return Workout(**dict(parsed))
+
+
+async def migrate_wod_parses() -> int:
+    """Move parses stored on WOD cache documents into the shared pool.
+
+    The WOD pre-parse originally kept its result on the cache document. Those
+    parses are just as reusable as any other, so they live in the pool now;
+    this moves existing ones across rather than re-paying for them.
+    """
+    from short_timer.db import get_wod_cache_collection
+
+    collection = get_wod_cache_collection()
+    moved = 0
+    async for doc in collection.find({"parsed": {"$ne": None}}):
+        parsed = doc.get("parsed")
+        text = doc.get("text")
+        if not isinstance(parsed, dict) or not isinstance(text, str) or not text:
+            continue
+        digest = source_hash(text)
+        await get_parse_cache_collection().update_one(
+            {"_id": digest},
+            {
+                "$set": {"source_hash": digest, "parsed": dict(parsed)},
+                "$setOnInsert": {"created_at": datetime.now(UTC)},
+            },
+            upsert=True,
+        )
+        await collection.update_one({"_id": doc["_id"]}, {"$unset": {"parsed": ""}})
+        moved += 1
+
+    if moved:
+        logger.info("Migrated %d WOD parse(s) into the shared parse pool.", moved)
+    return moved
