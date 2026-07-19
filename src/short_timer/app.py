@@ -9,7 +9,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from short_timer.config import get_settings
 from short_timer.db import backfill_owner_ids, backfill_source_hashes, ensure_indexes
 from short_timer.routers import auth, wods, workouts
-from short_timer.parse_cache import migrate_wod_parses
+from short_timer.parse_cache import (
+    backfill_parse_sources,
+    migrate_wod_parses,
+    prune_expired_parses,
+)
 from short_timer.wod_cache import (
     REFRESH_INTERVAL_SECONDS,
     ensure_wods_parsed,
@@ -35,6 +39,23 @@ async def _refresh_wods_daily() -> None:
         await asyncio.sleep(REFRESH_INTERVAL_SECONDS)
 
 
+#: User-submitted parses age out; sweep for them monthly. The loop runs once
+#: on startup too, so a host that restarts often still gets swept.
+_PRUNE_INTERVAL_SECONDS = 30 * 24 * 60 * 60
+
+
+async def _prune_parses_monthly() -> None:
+    """Drop user-submitted parses past their retention window."""
+    while True:
+        try:
+            await prune_expired_parses()
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - a failed sweep shouldn't kill the loop
+            logger.exception("Parse pool sweep failed; will retry next cycle.")
+        await asyncio.sleep(_PRUNE_INTERVAL_SECONDS)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Best-effort: a database that's slow or unreachable at boot shouldn't
@@ -44,24 +65,31 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         hashes = await backfill_source_hashes()
         owners = await backfill_owner_ids()
         moved = await migrate_wod_parses()
-        if hashes or owners or moved:
+        labelled = await backfill_parse_sources()
+        if hashes or owners or moved or labelled:
             logger.info(
-                "Backfilled source_hash on %d workout(s), owner_id on %d, "
-                "and moved %d WOD parse(s) into the shared pool.",
+                "Backfilled source_hash on %d workout(s), owner_id on %d, moved %d "
+                "WOD parse(s) into the shared pool, labelled %d for retention.",
                 hashes,
                 owners,
                 moved,
+                labelled,
             )
     except Exception:  # noqa: BLE001 - startup maintenance is non-critical
         logger.exception("Skipped startup database maintenance.")
 
-    refresher = asyncio.create_task(_refresh_wods_daily())
+    background = [
+        asyncio.create_task(_refresh_wods_daily()),
+        asyncio.create_task(_prune_parses_monthly()),
+    ]
     try:
         yield
     finally:
-        refresher.cancel()
-        with suppress(asyncio.CancelledError):
-            await refresher
+        for task in background:
+            task.cancel()
+        for task in background:
+            with suppress(asyncio.CancelledError):
+                await task
 
 
 app = FastAPI(title="short-timer", version="0.1.0", lifespan=lifespan)

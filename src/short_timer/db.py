@@ -46,7 +46,9 @@ async def ensure_indexes() -> None:
     await get_workouts_collection().create_index([("owner_id", 1), ("source_hash", 1)])
     await get_workouts_collection().create_index("owner_id")
     await get_wod_cache_collection().create_index("date")
-    # parse_cache is keyed by source hash as its _id, so it needs no extra index.
+    # parse_cache is keyed by source hash as its _id, so lookups need no index.
+    # The retention sweep filters on provenance and age, though.
+    await get_parse_cache_collection().create_index([("source", 1), ("created_at", 1)])
 
 
 async def backfill_source_hashes() -> int:

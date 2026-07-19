@@ -19,7 +19,12 @@ from short_timer.crossfit import Wod, fetch_recent_wods, is_rest_day
 from short_timer.db import get_wod_cache_collection
 from short_timer.dedup import source_hash
 from short_timer.llm import parse_workout_text
-from short_timer.parse_cache import find_parse, remember_parse
+from short_timer.parse_cache import (
+    SOURCE_CROSSFIT,
+    find_parse,
+    mark_permanent,
+    remember_parse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +116,10 @@ async def ensure_wods_parsed(limit: int = CACHE_DAYS) -> int:
         if not text or is_rest_day(text):
             continue
         if await find_parse(text) is not None:
+            # Someone pasted this day before we got to it — it's still
+            # crossfit.com's text, so keep it permanently rather than letting
+            # it age out on the user retention clock.
+            await mark_permanent(text)
             continue
         title = str(doc.get("title") or "") or None
         try:
@@ -118,7 +127,7 @@ async def ensure_wods_parsed(limit: int = CACHE_DAYS) -> int:
         except Exception:  # noqa: BLE001 - one bad day shouldn't stop the rest
             logger.exception("Could not pre-parse WOD %s", doc.get("date"))
             continue
-        await remember_parse(workout)
+        await remember_parse(workout, source=SOURCE_CROSSFIT)
         parsed += 1
 
     if parsed:
