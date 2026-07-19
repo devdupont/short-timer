@@ -1,102 +1,160 @@
 [
   {
     "name": "Fran",
-    "category": "girl",
+    "category": "benchmark",
     "source_text": "Fran\n21-15-9 reps for time of:\nThrusters, 95/65 lb\nPull-ups",
     "expected_mode": "for_time",
-    "expected_rep_scheme": [21, 15, 9],
-    "expected_movements": ["thruster", "pull-up"]
+    "expected_rep_scheme": [
+      21,
+      15,
+      9
+    ],
+    "expected_movements": [
+      "thruster",
+      "pull-up"
+    ]
   },
   {
     "name": "Cindy",
-    "category": "girl",
+    "category": "benchmark",
     "source_text": "Cindy\nAMRAP 20 minutes:\n5 Pull-ups\n10 Push-ups\n15 Air Squats",
     "expected_mode": "amrap",
     "expected_time_cap_seconds": 1200,
-    "expected_movements": ["pull-up", "push-up", "air squat"]
+    "expected_movements": [
+      "pull-up",
+      "push-up",
+      "air squat"
+    ]
   },
   {
     "name": "Grace",
-    "category": "girl",
+    "category": "benchmark",
     "source_text": "Grace\n30 reps for time of:\nClean and Jerks, 135/95 lb",
     "expected_mode": "for_time",
-    "expected_movements": ["clean and jerk"]
+    "expected_movements": [
+      "clean and jerk"
+    ]
   },
   {
     "name": "Helen",
-    "category": "girl",
+    "category": "benchmark",
     "source_text": "Helen\n3 rounds for time:\n400m Run\n21 Kettlebell Swings, 53/35 lb\n12 Pull-ups",
     "expected_mode": "for_time",
     "expected_rounds": 3,
-    "expected_movements": ["run", "kettlebell swing", "pull-up"]
+    "expected_movements": [
+      "run",
+      "kettlebell swing",
+      "pull-up"
+    ]
   },
   {
     "name": "Annie",
-    "category": "girl",
+    "category": "benchmark",
     "source_text": "Annie\n50-40-30-20-10 reps for time of:\nDouble-unders\nSit-ups",
     "expected_mode": "for_time",
-    "expected_rep_scheme": [50, 40, 30, 20, 10],
-    "expected_movements": ["double-under", "sit-up"]
+    "expected_rep_scheme": [
+      50,
+      40,
+      30,
+      20,
+      10
+    ],
+    "expected_movements": [
+      "double-under",
+      "sit-up"
+    ]
   },
   {
     "name": "Diane",
-    "category": "girl",
+    "category": "benchmark",
     "source_text": "Diane\n21-15-9 reps for time of:\nDeadlifts, 225/155 lb\nHandstand Push-ups",
     "expected_mode": "for_time",
-    "expected_rep_scheme": [21, 15, 9],
-    "expected_movements": ["deadlift", "handstand push-up"]
+    "expected_rep_scheme": [
+      21,
+      15,
+      9
+    ],
+    "expected_movements": [
+      "deadlift",
+      "handstand push-up"
+    ]
   },
   {
     "name": "Karen",
-    "category": "girl",
+    "category": "benchmark",
     "source_text": "Karen\n150 reps for time of:\nWall-ball Shots, 20/14 lb",
     "expected_mode": "for_time",
-    "expected_movements": ["wall-ball"]
+    "expected_movements": [
+      "wall-ball"
+    ]
   },
   {
     "name": "Isabel",
-    "category": "girl",
+    "category": "benchmark",
     "source_text": "Isabel\n30 reps for time of:\nSnatches, 135/95 lb",
     "expected_mode": "for_time",
-    "expected_movements": ["snatch"]
+    "expected_movements": [
+      "snatch"
+    ]
   },
   {
     "name": "Angie",
-    "category": "girl",
+    "category": "benchmark",
     "source_text": "Angie\nFor time, complete in order:\n100 Pull-ups\n100 Push-ups\n100 Sit-ups\n100 Air Squats",
     "expected_mode": "for_time",
-    "expected_movements": ["pull-up", "push-up", "sit-up", "air squat"]
+    "expected_movements": [
+      "pull-up",
+      "push-up",
+      "sit-up",
+      "air squat"
+    ]
   },
   {
     "name": "DT",
-    "category": "hero",
+    "category": "benchmark",
     "source_text": "DT\n5 rounds for time:\n12 Deadlifts, 155/105 lb\n9 Hang Power Cleans, 155/105 lb\n6 Push Jerks, 155/105 lb",
     "expected_mode": "for_time",
     "expected_rounds": 5,
-    "expected_movements": ["deadlift", "hang power clean", "push jerk"]
+    "expected_movements": [
+      "deadlift",
+      "hang power clean",
+      "push jerk"
+    ]
   },
   {
     "name": "Murph",
-    "category": "hero",
+    "category": "benchmark",
     "source_text": "Murph\nFor time:\n1 mile Run\n100 Pull-ups\n200 Push-ups\n300 Air Squats\n1 mile Run\n\nPartition the pull-ups, push-ups, and squats as needed. Start and finish with a mile run. If you've got a twenty pound vest or body armor, wear it.",
     "expected_mode": "for_time",
-    "expected_movements": ["run", "pull-up", "push-up", "air squat"],
+    "expected_movements": [
+      "run",
+      "pull-up",
+      "push-up",
+      "air squat"
+    ],
     "expected_min_segments": 2
   },
   {
     "name": "Nancy",
-    "category": "hero",
+    "category": "benchmark",
     "source_text": "Nancy\n5 rounds for time:\n400m Run\n15 Overhead Squats, 95/65 lb",
     "expected_mode": "for_time",
     "expected_rounds": 5,
-    "expected_movements": ["run", "overhead squat"]
+    "expected_movements": [
+      "run",
+      "overhead squat"
+    ]
   },
   {
     "name": "Jackie",
     "category": "benchmark",
     "source_text": "Jackie\nFor time:\n1000m Row\n50 Thrusters, 45 lb\n30 Pull-ups",
     "expected_mode": "for_time",
-    "expected_movements": ["row", "thruster", "pull-up"]
+    "expected_movements": [
+      "row",
+      "thruster",
+      "pull-up"
+    ]
   },
   {
     "name": "Chelsea",
@@ -105,7 +163,11 @@
     "expected_mode": "emom",
     "expected_rounds": 30,
     "expected_work_seconds": 60,
-    "expected_movements": ["pull-up", "push-up", "air squat"]
+    "expected_movements": [
+      "pull-up",
+      "push-up",
+      "air squat"
+    ]
   },
   {
     "name": "Tabata This",
@@ -115,7 +177,12 @@
     "expected_work_seconds": 20,
     "expected_rest_seconds": 10,
     "expected_rounds": 8,
-    "expected_movements": ["pull-up", "push-up", "sit-up", "air squat"]
+    "expected_movements": [
+      "pull-up",
+      "push-up",
+      "sit-up",
+      "air squat"
+    ]
   },
   {
     "name": "Bike Sprints",
@@ -125,6 +192,8 @@
     "expected_rounds": 8,
     "expected_work_seconds": 30,
     "expected_rest_seconds": 90,
-    "expected_movements": ["assault bike"]
+    "expected_movements": [
+      "assault bike"
+    ]
   }
 ]

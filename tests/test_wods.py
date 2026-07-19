@@ -1,0 +1,154 @@
+from datetime import date
+
+import httpx
+import pytest
+import respx
+from httpx import ASGITransport, AsyncClient, Response
+
+from short_timer import crossfit
+from short_timer.app import app
+from short_timer.crossfit import fetch_wod
+from short_timer.models import Workout, WorkoutMode
+from short_timer.wod_cache import CACHE_DAYS, get_wods, read_cached_wods, refresh_wod_cache
+
+_WOD_JSON = {
+    "wods": {
+        "cleanID": "20260718",
+        "title": "Saturday 260718",
+        "wodRaw": "50-40-30-20-10 reps for time of:\nDouble-unders\nSit-ups",
+    }
+}
+
+
+@pytest.fixture
+async def client():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+
+
+@pytest.fixture
+async def authed_client(client: AsyncClient) -> AsyncClient:
+    response = await client.post("/api/auth/login", json={"passcode": "test-passcode"})
+    assert response.status_code == 204
+    return client
+
+
+@respx.mock
+async def test_wods_are_served_from_cache_without_refetching() -> None:
+    """The daily refresh is the only thing that should hit crossfit.com."""
+    route = respx.route(url__regex=r"https://www\.crossfit\.com/workout/.*").mock(
+        return_value=Response(200, json=_WOD_JSON)
+    )
+    assert await refresh_wod_cache(force=True) > 0
+    calls_after_refresh = route.call_count
+
+    # Reads come out of Mongo, so no further upstream requests.
+    assert len(await get_wods(3)) > 0
+    assert len(await get_wods(3)) > 0
+    assert route.call_count == calls_after_refresh
+
+
+@respx.mock
+async def test_refresh_keeps_stale_cache_when_upstream_fails() -> None:
+    respx.route(url__regex=r"https://www\.crossfit\.com/workout/.*").mock(
+        return_value=Response(200, json=_WOD_JSON)
+    )
+    assert await refresh_wod_cache(force=True) > 0
+    cached = await read_cached_wods(CACHE_DAYS)
+
+    # crossfit.com goes down: keep serving what we already have.
+    respx.route(url__regex=r"https://www\.crossfit\.com/workout/.*").mock(
+        return_value=Response(502)
+    )
+    assert await refresh_wod_cache(force=True) == 0
+    assert len(await read_cached_wods(CACHE_DAYS)) == len(cached)
+
+
+@respx.mock
+async def test_refresh_skips_when_cache_is_fresh() -> None:
+    respx.route(url__regex=r"https://www\.crossfit\.com/workout/.*").mock(
+        return_value=Response(200, json=_WOD_JSON)
+    )
+    assert await refresh_wod_cache(force=True) > 0
+    # An unforced refresh right after should no-op rather than refetch.
+    assert await refresh_wod_cache() == 0
+
+
+@respx.mock
+async def test_fetch_wod_parses_json() -> None:
+    respx.get("https://www.crossfit.com/workout/2026/07/18").mock(
+        return_value=Response(200, json=_WOD_JSON)
+    )
+    async with httpx.AsyncClient() as http:
+        wod = await fetch_wod(http, date(2026, 7, 18))
+    assert wod is not None
+    assert wod.title == "Saturday 260718"
+    assert "Double-unders" in wod.text
+    assert wod.url == "https://www.crossfit.com/260718"
+
+
+@respx.mock
+async def test_fetch_wod_skips_server_error() -> None:
+    respx.get("https://www.crossfit.com/workout/2026/07/12").mock(return_value=Response(502))
+    async with httpx.AsyncClient() as http:
+        assert await fetch_wod(http, date(2026, 7, 12)) is None
+
+
+@respx.mock
+async def test_fetch_wod_skips_empty_body() -> None:
+    respx.get("https://www.crossfit.com/workout/2026/07/25").mock(
+        return_value=Response(200, json={"wods": {"title": "Future", "wodRaw": ""}})
+    )
+    async with httpx.AsyncClient() as http:
+        assert await fetch_wod(http, date(2026, 7, 25)) is None
+
+
+@respx.mock
+async def test_wods_endpoint_marks_saved(authed_client: AsyncClient) -> None:
+    respx.route(url__regex=r"https://www\.crossfit\.com/workout/.*").mock(
+        return_value=Response(200, json=_WOD_JSON)
+    )
+    # Save a workout whose source text matches the WOD so it's flagged as saved.
+    saved = await authed_client.post(
+        "/api/workouts",
+        json={
+            "workout": Workout(
+                name="Saturday 260718",
+                mode=WorkoutMode.FOR_TIME,
+                source_text=_WOD_JSON["wods"]["wodRaw"],
+            ).model_dump(mode="json")
+        },
+    )
+    saved_id = saved.json()["id"]
+
+    response = await authed_client.get("/api/wods?days=1")
+    assert response.status_code == 200
+    entries = response.json()
+    assert len(entries) == 1
+    assert entries[0]["title"] == "Saturday 260718"
+    assert entries[0]["saved_workout_id"] == saved_id
+
+
+@respx.mock
+async def test_wods_endpoint_unsaved_is_null(authed_client: AsyncClient) -> None:
+    respx.route(url__regex=r"https://www\.crossfit\.com/workout/.*").mock(
+        return_value=Response(200, json=_WOD_JSON)
+    )
+    response = await authed_client.get("/api/wods?days=1")
+    assert response.status_code == 200
+    assert response.json()[0]["saved_workout_id"] is None
+
+
+async def test_wods_requires_auth(client: AsyncClient) -> None:
+    assert (await client.get("/api/wods")).status_code == 401
+
+
+@respx.mock
+async def test_fetch_recent_wods_skips_failures() -> None:
+    respx.get("https://www.crossfit.com/workout/2026/07/18").mock(
+        return_value=Response(200, json=_WOD_JSON)
+    )
+    respx.get("https://www.crossfit.com/workout/2026/07/17").mock(return_value=Response(502))
+    wods = await crossfit.fetch_recent_wods(2, today=date(2026, 7, 18))
+    assert [w.date.isoformat() for w in wods] == ["2026-07-18"]

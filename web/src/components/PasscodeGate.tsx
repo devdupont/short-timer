@@ -22,18 +22,23 @@ export function PasscodeGate({ onUnlocked }: { onUnlocked: () => void }) {
 
   return (
     <div className="passcode-gate">
-      <form onSubmit={handleSubmit} className="passcode-form">
-        <h1>short-timer</h1>
-        <p>Enter the passcode to continue.</p>
-        <input
-          type="password"
-          autoFocus
-          value={passcode}
-          onChange={(e) => setPasscode(e.target.value)}
-          placeholder="Passcode"
-        />
+      <form onSubmit={handleSubmit} className="form-card auth-card">
+        <div className="auth-head">
+          <h1>shortimer</h1>
+          <p className="section-sub">Enter the passcode to continue.</p>
+        </div>
+        <label className="field">
+          <span className="field-label">Passcode</span>
+          <input
+            type="password"
+            autoFocus
+            value={passcode}
+            onChange={(e) => setPasscode(e.target.value)}
+            placeholder="••••••••"
+          />
+        </label>
         {error && <p className="error">{error}</p>}
-        <button type="submit" disabled={submitting || !passcode}>
+        <button type="submit" className="primary-button" disabled={submitting || !passcode}>
           {submitting ? "Checking…" : "Unlock"}
         </button>
       </form>

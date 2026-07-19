@@ -1,4 +1,4 @@
-import type { Workout } from "./types";
+import type { WodEntry, Workout } from "./types";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
@@ -46,6 +46,23 @@ export function parseWorkout(text: string, nameHint?: string): Promise<Workout> 
   });
 }
 
+/** Get-or-create: returns a saved workout matching the text, else parses and saves it. */
+export function loadWorkoutFromText(text: string, nameHint?: string): Promise<Workout> {
+  return request("/api/workouts/from-text", {
+    method: "POST",
+    body: JSON.stringify({ text, name_hint: nameHint ?? null }),
+  });
+}
+
+export function listWods(days?: number): Promise<WodEntry[]> {
+  return request(`/api/wods${days ? `?days=${days}` : ""}`);
+}
+
+/** Add the classic benchmark workouts (Murph, Cindy, Fran, …) to the library. */
+export function seedBenchmarks(): Promise<{ added: number; skipped: number }> {
+  return request("/api/workouts/seed", { method: "POST" });
+}
+
 export function listWorkouts(): Promise<Workout[]> {
   return request("/api/workouts");
 }
@@ -55,7 +72,15 @@ export function getWorkout(id: string): Promise<Workout> {
 }
 
 export function createWorkout(workout: Workout): Promise<Workout> {
-  return request("/api/workouts", { method: "POST", body: JSON.stringify({ workout }) });
+  // Drop the server-managed fields when they're empty (a freshly built workout
+  // has no id/timestamps yet) so the API's model defaults generate them rather
+  // than rejecting the blank strings.
+  const { id, created_at, updated_at, ...rest } = workout;
+  const payload: Record<string, unknown> = { ...rest };
+  if (id) payload.id = id;
+  if (created_at) payload.created_at = created_at;
+  if (updated_at) payload.updated_at = updated_at;
+  return request("/api/workouts", { method: "POST", body: JSON.stringify({ workout: payload }) });
 }
 
 export function updateWorkout(id: string, workout: Workout): Promise<Workout> {

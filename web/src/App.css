@@ -6,6 +6,7 @@
 }
 
 .app-header {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 24px;
@@ -18,24 +19,128 @@
   margin: 0;
 }
 
+/* On desktop the wrapper is transparent to layout, so the tabs and Lock
+   button flow directly in the header exactly as if it weren't there. */
+.nav-group {
+  display: contents;
+}
+
 .tabs {
   display: flex;
   gap: 8px;
   flex: 1;
 }
 
+/* Hamburger — hidden until the header gets tight on small screens. */
+.hamburger {
+  display: none;
+  margin-left: auto;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  width: 42px;
+  height: 38px;
+  padding: 0 10px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-sizing: border-box;
+}
+
+.hamburger span {
+  display: block;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--text-h);
+  transition: transform 0.2s, opacity 0.2s;
+}
+
+.hamburger.open span:nth-child(1) {
+  transform: translateY(7px) rotate(45deg);
+}
+
+.hamburger.open span:nth-child(2) {
+  opacity: 0;
+}
+
+.hamburger.open span:nth-child(3) {
+  transform: translateY(-7px) rotate(-45deg);
+}
+
+.nav-backdrop {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .app-header {
+    gap: 12px;
+  }
+
+  .hamburger {
+    display: flex;
+  }
+
+  .nav-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+  }
+
+  .nav-group {
+    display: none;
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 12px;
+    z-index: 60;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    min-width: 180px;
+    padding: 10px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+  }
+
+  .nav-group.open {
+    display: flex;
+  }
+
+  .nav-group .tabs {
+    flex-direction: column;
+    flex: none;
+    gap: 6px;
+  }
+
+  .nav-group .tabs button,
+  .nav-group .logout-button {
+    width: 100%;
+    text-align: left;
+  }
+}
+
 .tabs button,
 .logout-button {
   background: none;
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 14px;
+  border-radius: 8px;
+  padding: 7px 16px;
   color: var(--text);
   cursor: pointer;
   font: inherit;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
 }
 
-.tabs button.active {
+.tabs button:hover,
+.logout-button:hover {
+  color: var(--text-h);
+  border-color: var(--text);
+}
+
+.tabs button.active,
+.tabs button.active:hover {
   color: var(--accent);
   border-color: var(--accent-border);
   background: var(--accent-bg);
@@ -53,12 +158,15 @@ main {
   max-width: 640px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
 }
 
 .panel textarea,
 .panel input,
-.panel select {
+.panel select,
+.form-card textarea,
+.form-card input,
+.form-card select {
   width: 100%;
   box-sizing: border-box;
   font: inherit;
@@ -76,30 +184,382 @@ main {
   font-size: 14px;
 }
 
-.inline-fields {
-  display: flex;
-  gap: 8px;
+.panel textarea:focus,
+.panel input:focus,
+.panel select:focus,
+.form-card textarea:focus,
+.form-card input:focus,
+.form-card select:focus {
+  outline: none;
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px var(--accent-bg);
 }
 
-.inline-fields > * {
-  flex: 1;
-}
-
-.movement-row button {
-  flex: 0 0 auto;
-}
-
-.segment-editor {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.panel input::placeholder,
+.panel textarea::placeholder,
+.form-card input::placeholder,
+.form-card textarea::placeholder {
+  color: var(--text);
+  opacity: 0.55;
 }
 
 button {
   cursor: pointer;
+}
+
+/* ---- Shared form / card layout ---- */
+
+.builder {
+  gap: 20px;
+}
+
+.panel-intro,
+.builder-intro,
+.builder-section-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.section-sub {
+  font-size: 14px;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.section-title {
+  font-size: 18px;
+  color: var(--text-h);
+  margin: 0;
+}
+
+.form-card,
+.segment-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--social-bg);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-h);
+  letter-spacing: 0.01em;
+}
+
+.field-hint {
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.35;
+  min-height: 1em;
+}
+
+.required {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.optional {
+  color: var(--text);
+  font-weight: 400;
+}
+
+/* mm:ss entry — two compact boxes either side of a colon. */
+.duration-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.duration-input input {
+  text-align: center;
+  min-width: 0;
+  flex: 1;
+}
+
+/* Spinners eat most of the width in these narrow boxes. */
+.duration-input input::-webkit-outer-spin-button,
+.duration-input input::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+.duration-input input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.duration-sep {
+  color: var(--text);
+  font-weight: 700;
+  font-family: var(--mono);
+}
+
+.field-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.field-grid.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.field-grid.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 520px) {
+  .field-grid.three {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.segment-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.segment-badge {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-bg);
+  border-radius: 999px;
+  padding: 4px 12px;
+}
+
+.movement-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.movement-item {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.movement-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.movement-item-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+.text-remove {
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 13px;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+
+.text-remove:hover {
+  color: #e5484d;
+  background: rgba(229, 72, 77, 0.1);
+}
+
+.icon-remove {
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.icon-remove:hover {
+  color: #e5484d;
+  background: rgba(229, 72, 77, 0.1);
+}
+
+.add-button {
+  background: none;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  color: var(--text-h);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  padding: 12px;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.add-button:hover {
+  border-color: var(--accent-border);
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.add-segment {
+  border-style: solid;
+  padding: 14px;
+}
+
+.builder-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.primary-button {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  padding: 11px 28px;
+}
+
+.primary-button:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.primary-button:disabled {
+  background: var(--border);
+  border-color: var(--border);
+  color: var(--text);
+  cursor: not-allowed;
+}
+
+.secondary-button {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-h);
+  font: inherit;
+  font-weight: 500;
+  padding: 11px 20px;
+}
+
+.secondary-button:hover:not(:disabled) {
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.secondary-button:disabled {
+  color: var(--text);
+  cursor: not-allowed;
+}
+
+.library-search {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text-h);
+}
+
+.library-search:focus {
+  outline: none;
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+/* ---- CrossFit WOD tab ---- */
+
+.wod-panel {
+  max-width: 760px;
+}
+
+.wod-card {
+  gap: 14px;
+}
+
+.wod-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.wod-date {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  margin: 0 0 2px;
+}
+
+.wod-card .section-title {
+  margin: 0;
+}
+
+.wod-featured {
+  border-color: var(--accent-border);
+  box-shadow: var(--shadow);
+}
+
+.wod-featured .wod-text {
+  font-size: 17px;
+}
+
+.wod-text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--text-h);
+}
+
+.wod-link {
+  color: var(--text);
+  font-size: 13px;
+  text-decoration: none;
+  align-self: center;
+}
+
+.wod-link:hover {
+  color: var(--accent);
+}
+
+.wod-earlier-heading {
+  margin: 8px 0 0;
+}
+
+.wod-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .error {
@@ -110,18 +570,45 @@ button {
 .category-badge {
   display: inline-block;
   font-size: 12px;
-  padding: 2px 8px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 3px 10px;
   border-radius: 999px;
   background: var(--accent-bg);
   color: var(--accent);
-  margin-right: 6px;
 }
 
-.preview {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 16px;
+.category-badge {
+  background: var(--social-bg);
+  color: var(--text);
 }
+
+.badge-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* ---- Paste / import preview ---- */
+
+.preview-card {
+  gap: 12px;
+}
+
+.preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.preview-head .section-title {
+  margin: 0;
+}
+
+/* ---- Library ---- */
 
 .library-list {
   list-style: none;
@@ -129,66 +616,298 @@ button {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
-.library-list li {
+.library-row {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 8px;
 }
 
 .library-item {
   flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   text-align: left;
-  background: none;
+  background: var(--social-bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 14px;
+  border-radius: 10px;
+  padding: 14px 16px;
   color: var(--text-h);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.library-item:hover {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+}
+
+.library-item-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.row-action {
+  background: none;
+  border: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  padding: 0 12px;
+  border-radius: 8px;
+}
+
+.row-action:hover {
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.builder-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.builder-heading h2 {
+  margin: 0;
+}
+
+.builder-new {
+  flex: 0 0 auto;
+  padding: 8px 20px;
 }
 
 .delete-button {
   background: none;
-  border: 1px solid var(--border);
+  border: none;
+  color: var(--text);
+  font-size: 14px;
+  padding: 0 12px;
   border-radius: 8px;
+}
+
+.delete-button:hover {
   color: #e5484d;
+  background: rgba(229, 72, 77, 0.1);
+}
+
+.empty-state {
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  padding: 32px 20px;
+  text-align: center;
+  color: var(--text);
+  font-size: 15px;
+}
+
+.library-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.library-footer {
+  display: flex;
+  justify-content: center;
+  margin-top: 4px;
 }
 
 .timer-view {
+  position: relative;
+  width: 100%;
+  max-width: 1100px;
+  display: flex;
+  flex-direction: column;
   align-items: center;
   text-align: center;
+  gap: 12px;
+}
+
+.timer-toolbar {
+  width: 100%;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.tv-toggle {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  padding: 6px 12px;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.tv-toggle:hover {
+  color: var(--text-h);
+  border-color: var(--text);
+}
+
+.timer-header h2 {
+  font-size: clamp(20px, 3vw, 32px);
+  margin: 0;
+}
+
+.phase-label {
+  font-size: clamp(20px, 4vw, 40px);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin: 0;
+  color: var(--work-color);
+}
+
+.phase-label.phase-rest {
+  color: var(--rest-color);
+}
+
+.phase-label.phase-countdown {
+  color: var(--leg-color);
+}
+
+/* The lead-in reads as "not started yet" — distinct from the work/rest clock. */
+.clock.countdown {
+  color: var(--leg-color);
 }
 
 .clock {
-  font-size: 96px;
+  font-size: clamp(96px, 24vw, 340px);
   font-family: var(--mono);
-  font-weight: 600;
-  color: var(--text-h);
-  margin: 16px 0;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--work-color);
+  margin: 8px 0;
+  font-variant-numeric: tabular-nums;
 }
 
 .clock.rest {
-  color: var(--accent);
+  color: var(--rest-color);
 }
 
 .clock.over-cap {
   color: #e5484d;
 }
 
-.round-indicator {
-  font-size: 18px;
-  text-transform: capitalize;
+.current-movement {
+  font-size: clamp(28px, 6vw, 64px);
+  font-weight: 600;
+  color: var(--text-h);
+  margin: 0;
+}
+
+.time-bar,
+.leg-bar,
+.round-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: min(100%, 700px);
+  margin: 12px 0;
+}
+
+.leg-bar {
+  margin-bottom: 0;
+}
+
+/* Elapsed-vs-cap bar for count-up modes: fills toward the cap on the right,
+   no number on the left. */
+.time-track {
+  flex: 1;
+  height: clamp(10px, 1.6vw, 20px);
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.time-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.2s linear;
+}
+
+.time-fill.over-cap {
+  background: #e5484d;
+}
+
+.time-cap-label {
+  font-family: var(--mono);
+  font-size: clamp(20px, 3vw, 36px);
+  font-weight: 700;
+  color: var(--text);
+  min-width: 1.4em;
+}
+
+.leg-number {
+  font-family: var(--mono);
+  font-size: clamp(16px, 2.2vw, 26px);
+  font-weight: 700;
+  color: var(--text-h);
+  min-width: 1.4em;
+}
+
+.leg-total {
+  color: var(--text);
+}
+
+.leg-track {
+  flex: 1;
+  height: clamp(6px, 1vw, 12px);
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.leg-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--leg-color);
+  transition: width 0.2s linear;
+}
+
+.round-number {
+  font-family: var(--mono);
+  font-size: clamp(20px, 3vw, 36px);
+  font-weight: 700;
+  color: var(--text-h);
+  min-width: 1.4em;
+}
+
+.round-total {
+  color: var(--text);
+}
+
+.round-track {
+  flex: 1;
+  height: clamp(10px, 1.6vw, 20px);
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.round-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.2s linear;
 }
 
 .timer-controls {
   display: flex;
   gap: 12px;
-  margin: 16px 0;
+  margin: 8px 0 16px;
 }
 
 .timer-controls button {
-  font-size: 18px;
+  font-size: clamp(16px, 1.6vw, 22px);
   padding: 10px 24px;
   border-radius: 8px;
   border: 1px solid var(--border);
@@ -199,6 +918,105 @@ button {
 .segment-list {
   text-align: left;
   width: 100%;
+  max-width: 640px;
+  color: var(--text);
+  font-size: 15px;
+}
+
+/* ---- TV / wall-display mode ----
+   The timer takes over the whole viewport and every element scales with the
+   screen so it stays legible from across a room. Sizes use min(vw, vh) so the
+   clock fills width on a wide TV without overflowing a tall/portrait screen. */
+
+.timer-view.tv {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  max-width: none;
+  width: 100vw;
+  height: 100svh;
+  box-sizing: border-box;
+  padding: 3vmin;
+  background: var(--bg);
+  justify-content: center;
+  gap: 2vmin;
+}
+
+.timer-view.tv .timer-toolbar {
+  position: absolute;
+  top: 2vmin;
+  right: 2vmin;
+  width: auto;
+  z-index: 2;
+}
+
+.timer-view.tv .tv-toggle {
+  font-size: clamp(14px, 1.6vw, 24px);
+  padding: 0.5em 1em;
+}
+
+.timer-view.tv .timer-header h2 {
+  font-size: min(6vw, 8vh);
+}
+
+.timer-view.tv .mode-badge {
+  font-size: min(2.6vw, 3.4vh);
+  padding: 0.3em 1em;
+}
+
+.timer-view.tv .phase-label {
+  font-size: min(6vw, 7vh);
+}
+
+.timer-view.tv .clock {
+  font-size: min(27vw, 54vh);
+  margin: 1vmin 0;
+}
+
+.timer-view.tv .current-movement {
+  font-size: min(9vw, 11vh);
+}
+
+.timer-view.tv .time-bar,
+.timer-view.tv .leg-bar,
+.timer-view.tv .round-bar {
+  width: min(92vw, 1600px);
+  gap: 3vmin;
+  margin: 1.5vmin 0;
+}
+
+.timer-view.tv .time-track,
+.timer-view.tv .round-track {
+  height: min(3.2vh, 34px);
+}
+
+.timer-view.tv .leg-track {
+  height: min(2.2vh, 22px);
+}
+
+.timer-view.tv .round-number,
+.timer-view.tv .time-cap-label {
+  font-size: min(5vw, 6vh);
+}
+
+.timer-view.tv .leg-number {
+  font-size: min(3.6vw, 4.4vh);
+}
+
+.timer-view.tv .timer-controls {
+  gap: 2vmin;
+  margin: 1vmin 0;
+}
+
+.timer-view.tv .timer-controls button {
+  font-size: min(2.6vw, 3.2vh);
+  padding: 0.6em 1.6em;
+}
+
+/* The written movement breakdown is reference detail, not a from-across-the-room
+   signal — drop it in TV mode to give the clock room. */
+.timer-view.tv .segment-list {
+  display: none;
 }
 
 .passcode-gate {
@@ -206,29 +1024,29 @@ button {
   align-items: center;
   justify-content: center;
   min-height: 100svh;
+  padding: 24px;
+  box-sizing: border-box;
 }
 
-.passcode-form {
+.auth-card {
+  width: min(360px, 100%);
+  gap: 18px;
+}
+
+.auth-head {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  width: 280px;
+  gap: 6px;
+  align-items: center;
   text-align: center;
 }
 
-.passcode-form input {
-  font: inherit;
-  padding: 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  text-align: center;
+.auth-head h1 {
+  font-size: 34px;
+  letter-spacing: -1px;
+  margin: 0;
 }
 
-.passcode-form button {
-  font: inherit;
-  padding: 10px;
-  border-radius: 6px;
-  border: 1px solid var(--accent-border);
-  background: var(--accent-bg);
-  color: var(--accent);
+.auth-card .primary-button {
+  width: 100%;
 }
