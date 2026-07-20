@@ -1,9 +1,11 @@
 """Runtime settings, loaded from the environment (see .env.example)."""
 
+import json
 from functools import lru_cache
+from typing import Annotated
 
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -18,11 +20,46 @@ class Settings(BaseSettings):
 
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-5"
+    #: Cap on a single parse. The SDK's default is 10 minutes, long enough for
+    #: one hung call to tie up a request the caller has long since abandoned.
+    anthropic_timeout_seconds: float = 45.0
+    anthropic_max_retries: int = 1
 
     mongodb_uri: str = "mongodb://localhost:27017"
     mongodb_db_name: str = "short_timer"
 
-    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
+    # NoDecode stops pydantic-settings JSON-decoding this before our validator
+    # runs. Without it, the obvious CORS_ORIGINS=https://shortimer.com raises a
+    # SettingsError and the container fails to start.
+    cors_origins: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["http://localhost:5173"]
+    )
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _split_origins(cls, value: object) -> object:
+        """Accept a comma-separated list, a JSON array, or a real list."""
+        if not isinstance(value, str):
+            return value
+        text = value.strip()
+        if text.startswith("["):
+            return json.loads(text)
+        return [origin.strip() for origin in text.split(",") if origin.strip()]
+
+    # --- Trusting the caller's address --------------------------------------
+    # Rate limits are counted per client address, so a spoofable address means
+    # a bypassable limit. Both settings default to trusting nothing: the
+    # socket peer is used unless the deployment says otherwise.
+    #
+    #: A single-value header set by the platform's proxy and not forwardable by
+    #: the caller — e.g. "fly-client-ip", "cf-connecting-ip". Preferred when
+    #: available, because there's no list to mis-parse.
+    client_ip_header: str | None = None
+    #: Number of trusted proxies that *append* to X-Forwarded-For. Azure
+    #: Container Apps' ingress is one such hop. Anything a client sends arrives
+    #: to the left of what the proxies appended, so we count from the right;
+    #: 0 disables X-Forwarded-For entirely.
+    trusted_proxy_hops: int = 0
 
     # --- Abuse and cost controls -------------------------------------------
     rate_limit_enabled: bool = True

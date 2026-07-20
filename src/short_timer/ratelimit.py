@@ -51,15 +51,36 @@ def subject_for(request: Request, owner_id: str) -> str:
 
 
 def client_ip(request: Request) -> str:
-    """Best-effort client address, honouring a proxy's forwarded header.
+    """The caller's address, trusting only what the deployment says to trust.
 
-    Behind a load balancer the socket address is the proxy's, so the real
-    client comes from X-Forwarded-For. Only trust this if the app is actually
-    behind a proxy that overwrites the header.
+    Rate limits are counted per address, so getting this wrong is a bypass:
+    if we believed a client-supplied header, a guesser could defeat the login
+    limit by sending a different value on every attempt.
+
+    Proxies *append* to X-Forwarded-For, so the leftmost entry is whatever the
+    caller sent and the rightmost entries are what our own infrastructure
+    added. We therefore count in from the right by the number of trusted hops
+    rather than taking the first entry. With nothing configured we ignore
+    headers altogether and use the socket peer.
     """
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    settings = get_settings()
+
+    # A single-value platform header, where present, is unambiguous.
+    if settings.client_ip_header:
+        value = request.headers.get(settings.client_ip_header)
+        if value and value.strip():
+            return value.strip()
+
+    hops = settings.trusted_proxy_hops
+    if hops > 0:
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            parts = [part.strip() for part in forwarded.split(",") if part.strip()]
+            # Fewer entries than trusted hops means the header didn't come
+            # through the expected path; fall back rather than trust it.
+            if len(parts) >= hops:
+                return parts[-hops]
+
     return request.client.host if request.client else "unknown"
 
 
