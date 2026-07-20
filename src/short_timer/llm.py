@@ -7,6 +7,8 @@ prose we'd have to parse ourselves.
 
 from __future__ import annotations
 
+from functools import lru_cache
+
 from anthropic import AsyncAnthropic
 from anthropic.types import ToolChoiceToolParam, ToolParam
 
@@ -116,9 +118,26 @@ class WorkoutParseError(RuntimeError):
     """Raised when the LLM's response can't be turned into a `Workout`."""
 
 
+@lru_cache
+def _client() -> AsyncAnthropic:
+    """One client, reused across requests.
+
+    Rebuilding it per call throws away the connection pool. The explicit
+    timeout matters more: the SDK defaults to ten minutes, long enough for a
+    single hung call to hold a request — and a container replica — open well
+    past the point the caller has given up.
+    """
+    settings = get_settings()
+    return AsyncAnthropic(
+        api_key=settings.anthropic_api_key,
+        timeout=settings.anthropic_timeout_seconds,
+        max_retries=settings.anthropic_max_retries,
+    )
+
+
 async def parse_workout_text(text: str, name_hint: str | None = None) -> Workout:
     settings = get_settings()
-    client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+    client = _client()
 
     user_content = text if not name_hint else f"Workout name: {name_hint}\n\n{text}"
     tool_choice: ToolChoiceToolParam = {"type": "tool", "name": "emit_workout"}

@@ -44,7 +44,9 @@ jobs:
     name: Build and deploy
     needs: test
     runs-on: ubuntu-latest
-    environment: production
+    # No GitHub environment on purpose: adding one changes the OIDC subject
+    # Azure federates on, so it needs a matching credential. Add both together
+    # if you later want approval gates (see docs/deploy-azure.md).
     steps:
       - uses: actions/checkout@v4
 
