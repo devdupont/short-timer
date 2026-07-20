@@ -1,0 +1,108 @@
+name: Deploy API to Azure Container Apps
+
+# The API image is built here and published to GHCR (free for this public
+# repo, so no Azure Container Registry to pay for). Container Apps then pulls
+# it anonymously.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "Dockerfile"
+      - ".dockerignore"
+      - ".github/workflows/deploy-api.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write # publish the image to GHCR
+  id-token: write # OIDC federated login to Azure, so no stored credentials
+
+concurrency:
+  group: deploy-api
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Reuse the same commands as local dev rather than a parallel setup that
+      # can drift. Tests need no external services: Mongo is mocked and the
+      # Anthropic client is never called.
+      - run: pipx install hatch
+      - run: hatch run test
+      - run: hatch run types
+
+  deploy:
+    name: Build and deploy
+    needs: test
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive image tag
+        id: image
+        run: |
+          # Tag by commit, not just :latest. Container Apps decides whether to
+          # roll a new revision by comparing the image reference, so a moving
+          # tag can silently deploy nothing.
+          echo "ref=ghcr.io/${GITHUB_REPOSITORY,,}/api:${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+          echo "latest=ghcr.io/${GITHUB_REPOSITORY,,}/api:latest" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.image.outputs.ref }}
+            ${{ steps.image.outputs.latest }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy new revision
+        run: |
+          # Avoid an interactive prompt if the extension isn't present.
+          az config set extension.use_dynamic_install=yes_without_prompt
+          az containerapp update \
+            --name "${{ vars.AZURE_CONTAINERAPP }}" \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --image "${{ steps.image.outputs.ref }}"
+
+      - name: Verify the deployed revision is serving
+        run: |
+          # A green deploy that can't reach Mongo is still a broken deploy, so
+          # gate on readiness rather than assuming success.
+          url="https://${{ vars.API_HOSTNAME }}/api/ready"
+          for attempt in $(seq 1 30); do
+            code=$(curl -fsS -o /dev/null -w '%{http_code}' "$url" 2>/dev/null || true)
+            if [ "$code" = "200" ]; then
+              echo "Ready after ${attempt} attempt(s)."
+              exit 0
+            fi
+            echo "attempt ${attempt}: got '${code:-no response}', retrying..."
+            sleep 5
+          done
+          echo "::error::New revision never became ready at ${url}"
+          exit 1

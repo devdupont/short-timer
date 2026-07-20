@@ -95,8 +95,11 @@ class Workout(BaseModel):
 
 
 class WorkoutParseRequest(BaseModel):
-    text: str
-    name_hint: str | None = None
+    # Bounded because this text is sent to the model — an unbounded paste is a
+    # direct route to a large token bill. Real workouts are a few hundred
+    # characters; crossfit.com's longest daily entries are ~2k.
+    text: str = Field(min_length=1, max_length=20_000)
+    name_hint: str | None = Field(default=None, max_length=200)
 
 
 class WorkoutCreateRequest(BaseModel):

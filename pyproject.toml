@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "A programmable workout timer server: paste in a workout, get back a runnable timer."
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 authors = [{ name = "Michael Dupont" }]
 dependencies = [
     "fastapi>=0.115",
@@ -57,7 +57,7 @@ seed-data = "python scripts/build_benchmark_seed.py {args}"
 
 [tool.mypy]
 plugins = ["pydantic.mypy"]
-python_version = "3.14"
+python_version = "3.12"
 strict = true
 files = ["src"]
 

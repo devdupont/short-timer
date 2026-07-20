@@ -14,10 +14,19 @@ it lets us reuse the source text for LLM-parse caching.
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import date, datetime, timedelta
 
 import httpx
 from pydantic import BaseModel
+
+# Leading \W* skips the markdown bold markers crossfit.com wraps it in.
+_REST_DAY = re.compile(r"^\W*rest day", re.IGNORECASE)
+
+
+def is_rest_day(text: str) -> bool:
+    """crossfit.com programs scheduled rest days, which have no workout to time."""
+    return bool(_REST_DAY.match(text.strip()))
 
 USER_AGENT = "short-timer/0.1 (+https://github.com/devdupont/short-timer)"
 _API_URL = "https://www.crossfit.com/workout/{year}/{month:02d}/{day:02d}"

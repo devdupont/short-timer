@@ -9,7 +9,14 @@ from short_timer import crossfit
 from short_timer.app import app
 from short_timer.crossfit import fetch_wod
 from short_timer.models import Workout, WorkoutMode
-from short_timer.wod_cache import CACHE_DAYS, get_wods, read_cached_wods, refresh_wod_cache
+from short_timer.parse_cache import find_parse, migrate_wod_parses
+from short_timer.wod_cache import (
+    CACHE_DAYS,
+    ensure_wods_parsed,
+    get_wods,
+    read_cached_wods,
+    refresh_wod_cache,
+)
 
 _WOD_JSON = {
     "wods": {
@@ -63,6 +70,116 @@ async def test_refresh_keeps_stale_cache_when_upstream_fails() -> None:
     )
     assert await refresh_wod_cache(force=True) == 0
     assert len(await read_cached_wods(CACHE_DAYS)) == len(cached)
+
+
+@respx.mock
+async def test_wods_are_parsed_once_and_shared(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One parse per WOD, however many libraries it ends up in."""
+    respx.route(url__regex=r"https://www\.crossfit\.com/workout/.*").mock(
+        return_value=Response(200, json=_WOD_JSON)
+    )
+    calls = 0
+
+    async def counting_parse(text: str, name_hint: str | None = None) -> Workout:
+        nonlocal calls
+        calls += 1
+        return Workout(name="Parsed", mode=WorkoutMode.FOR_TIME, source_text=text)
+
+    monkeypatch.setattr("short_timer.wod_cache.parse_workout_text", counting_parse)
+
+    await refresh_wod_cache(force=True)
+    assert await ensure_wods_parsed() > 0
+    parses_after_prewarm = calls
+
+    # A second pass has nothing left to do.
+    assert await ensure_wods_parsed() == 0
+    assert calls == parses_after_prewarm
+
+    # And the shared parse is available to clone, with its own fresh id.
+    shared = await find_parse(_WOD_JSON["wods"]["wodRaw"])
+    assert shared is not None
+    again = await find_parse(_WOD_JSON["wods"]["wodRaw"])
+    assert again is not None and again.id != shared.id
+    assert calls == parses_after_prewarm
+
+
+@respx.mock
+async def test_rest_days_are_not_parsed(monkeypatch: pytest.MonkeyPatch) -> None:
+    respx.route(url__regex=r"https://www\.crossfit\.com/workout/.*").mock(
+        return_value=Response(
+            200, json={"wods": {"title": "Rest", "wodRaw": "**Rest Day**\n\nA hero story."}}
+        )
+    )
+
+    async def exploding_parse(text: str, name_hint: str | None = None) -> Workout:
+        raise AssertionError("rest days have no workout to parse")
+
+    monkeypatch.setattr("short_timer.wod_cache.parse_workout_text", exploding_parse)
+
+    await refresh_wod_cache(force=True)
+    assert await ensure_wods_parsed() == 0
+
+
+@respx.mock
+async def test_refetch_preserves_parse_but_stale_text_invalidates_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    respx.route(url__regex=r"https://www\.crossfit\.com/workout/.*").mock(
+        return_value=Response(200, json=_WOD_JSON)
+    )
+    calls = 0
+
+    async def counting_parse(text: str, name_hint: str | None = None) -> Workout:
+        nonlocal calls
+        calls += 1
+        return Workout(name="Parsed", mode=WorkoutMode.FOR_TIME, source_text=text)
+
+    monkeypatch.setattr("short_timer.wod_cache.parse_workout_text", counting_parse)
+
+    await refresh_wod_cache(force=True)
+    await ensure_wods_parsed()
+    first_pass = calls
+
+    # Re-fetching identical text must not throw away the existing parses.
+    await refresh_wod_cache(force=True)
+    assert await ensure_wods_parsed() == 0
+    assert calls == first_pass
+
+    # If crossfit.com edits the text, the old parse is stale and must be redone.
+    edited = {"wods": {**_WOD_JSON["wods"], "wodRaw": "21-15-9 reps for time of:\nThrusters"}}
+    respx.route(url__regex=r"https://www\.crossfit\.com/workout/.*").mock(
+        return_value=Response(200, json=edited)
+    )
+    await refresh_wod_cache(force=True)
+    assert await ensure_wods_parsed() > 0
+    assert calls > first_pass
+
+
+async def test_existing_wod_parses_migrate_into_the_pool() -> None:
+    """Parses stored on WOD documents move across rather than being re-paid for."""
+    from short_timer.db import get_wod_cache_collection
+
+    text = "21-15-9 reps for time of:\nThrusters\nPull-ups"
+    await get_wod_cache_collection().insert_one(
+        {
+            "_id": "2026-07-18",
+            "date": "2026-07-18",
+            "title": "Legacy row",
+            "text": text,
+            "url": "https://www.crossfit.com/260718",
+            "parsed": {"name": "Legacy", "mode": "for_time", "segments": [], "source_text": text},
+        }
+    )
+
+    assert await find_parse(text) is None
+    assert await migrate_wod_parses() == 1
+    found = await find_parse(text)
+    assert found is not None and found.name == "Legacy"
+
+    # Idempotent, and the old copy is cleared so there's one source of truth.
+    assert await migrate_wod_parses() == 0
+    doc = await get_wod_cache_collection().find_one({"_id": "2026-07-18"})
+    assert doc is not None and "parsed" not in doc
 
 
 @respx.mock

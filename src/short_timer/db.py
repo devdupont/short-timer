@@ -35,12 +35,27 @@ def get_wod_cache_collection() -> AsyncCollection[dict[str, Any]]:
     return get_database()["wod_cache"]
 
 
+def get_parse_cache_collection() -> AsyncCollection[dict[str, Any]]:
+    """Shared pool of parsed workouts, keyed by source-text hash (`_id`)."""
+    return get_database()["parse_cache"]
+
+
+def get_rate_limit_collection() -> AsyncCollection[dict[str, Any]]:
+    """Rate-limit counters, one document per (scope, subject, window)."""
+    return get_database()["rate_limits"]
+
+
 async def ensure_indexes() -> None:
     """Index the fields every hot query filters on."""
     # Dedup lookups are always scoped to an owner, so index the pair.
     await get_workouts_collection().create_index([("owner_id", 1), ("source_hash", 1)])
     await get_workouts_collection().create_index("owner_id")
     await get_wod_cache_collection().create_index("date")
+    # parse_cache is keyed by source hash as its _id, so lookups need no index.
+    # The retention sweep filters on provenance and age, though.
+    await get_parse_cache_collection().create_index([("source", 1), ("created_at", 1)])
+    # Spent rate-limit windows clean themselves up rather than growing forever.
+    await get_rate_limit_collection().create_index("expires_at", expireAfterSeconds=0)
 
 
 async def backfill_source_hashes() -> int:

@@ -201,6 +201,98 @@ async def test_another_owners_workout_is_invisible(
     assert parsed.json()["id"] != "not-mine"
 
 
+async def test_loading_a_prewarmed_wod_costs_no_llm_call(
+    authed_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A WOD parsed by the daily task is copied, not re-parsed, per user."""
+    from short_timer.parse_cache import remember_parse
+
+    text = "50-40-30-20-10 reps for time of:\nDouble-unders\nSit-ups"
+    # What the daily background task leaves behind in the shared pool.
+    await remember_parse(
+        Workout(name="Sunday 260719", mode=WorkoutMode.FOR_TIME, source_text=text)
+    )
+
+    async def exploding_parse(text: str, name_hint: str | None = None) -> Workout:
+        raise AssertionError("a pre-parsed WOD must not hit the model")
+
+    monkeypatch.setattr("short_timer.routers.workouts.parse_workout_text", exploding_parse)
+
+    saved = await authed_client.post("/api/workouts/from-text", json={"text": text})
+    assert saved.status_code == 201
+    assert saved.json()["name"] == "Sunday 260719"
+
+    # Saved into this owner's library, and repeat loads stay free.
+    listed = await authed_client.get("/api/workouts")
+    assert len(listed.json()) == 1
+    again = await authed_client.post("/api/workouts/from-text", json={"text": text})
+    assert again.json()["id"] == saved.json()["id"]
+
+
+async def test_parse_is_shared_across_owners(
+    authed_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One user's parse spares every other user the same LLM call."""
+    from short_timer.auth import current_owner
+    from short_timer.app import app as fastapi_app
+
+    calls = 0
+
+    async def counting_parse(text: str, name_hint: str | None = None) -> Workout:
+        nonlocal calls
+        calls += 1
+        return _fran().model_copy(update={"source_text": text})
+
+    monkeypatch.setattr("short_timer.routers.workouts.parse_workout_text", counting_parse)
+
+    text = "Helen\n3 rounds for time:\n400m run\n21 kettlebell swings\n12 pull-ups"
+    first = await authed_client.post("/api/workouts/from-text", json={"text": text})
+    assert first.status_code == 201
+    assert calls == 1
+
+    # Same text, different owner: served from the shared pool, no second call.
+    fastapi_app.dependency_overrides[current_owner] = lambda: "second-user"
+    try:
+        second = await authed_client.post("/api/workouts/from-text", json={"text": text})
+        assert second.status_code == 201
+        assert calls == 1
+        # Their own copy, not a pointer at the first user's record.
+        assert second.json()["id"] != first.json()["id"]
+    finally:
+        fastapi_app.dependency_overrides.pop(current_owner, None)
+
+
+async def test_one_owners_edits_do_not_leak_to_another(
+    authed_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pool shares the neutral parse, never a user's customizations."""
+    from short_timer.auth import current_owner
+    from short_timer.app import app as fastapi_app
+
+    async def fake_parse(text: str, name_hint: str | None = None) -> Workout:
+        return _fran().model_copy(update={"source_text": text})
+
+    monkeypatch.setattr("short_timer.routers.workouts.parse_workout_text", fake_parse)
+
+    text = "Murph\nFor time:\n1 mile run\n100 pull-ups"
+    created = await authed_client.post("/api/workouts/from-text", json={"text": text})
+    workout_id = created.json()["id"]
+
+    # First owner customizes their copy: renames it and adds a time cap.
+    edited = created.json() | {"name": "Murph — masters scaling", "time_cap_seconds": 3600}
+    updated = await authed_client.put(f"/api/workouts/{workout_id}", json={"workout": edited})
+    assert updated.status_code == 200
+
+    # A second owner pasting the same text gets the neutral parse.
+    fastapi_app.dependency_overrides[current_owner] = lambda: "second-user"
+    try:
+        theirs = await authed_client.post("/api/workouts/from-text", json={"text": text})
+        assert theirs.json()["name"] == "Fran"  # the parse, not the rename
+        assert theirs.json()["time_cap_seconds"] is None
+    finally:
+        fastapi_app.dependency_overrides.pop(current_owner, None)
+
+
 async def test_seed_benchmarks_is_idempotent(authed_client: AsyncClient) -> None:
     first = await authed_client.post("/api/workouts/seed")
     assert first.status_code == 200

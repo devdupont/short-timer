@@ -24,6 +24,19 @@ class Settings(BaseSettings):
 
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
 
+    # --- Abuse and cost controls -------------------------------------------
+    rate_limit_enabled: bool = True
+    #: Brute-force protection for the shared passcode, counted per client IP.
+    login_attempts_per_15_min: int = 10
+    #: Parsing costs an Anthropic call, so it's capped per caller and overall.
+    #: The global cap is the backstop on total spend.
+    llm_calls_per_hour_per_subject: int = 60
+    llm_calls_per_hour_global: int = 500
+    #: Bounds ordinary write traffic without getting in a real user's way.
+    writes_per_minute_per_subject: int = 120
+    #: Longest workout text we'll accept; guards token spend on huge pastes.
+    max_workout_text_chars: int = 20_000
+
 
 @lru_cache
 def get_settings() -> Settings:
