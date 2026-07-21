@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 import { useTimerEngine } from "../hooks/useTimerEngine";
+import { useTimerAudio } from "../hooks/useTimerAudio";
 import type { Workout } from "../types";
 import { MODE_LABELS } from "../types";
+
+const MUTED_KEY = "short-timer:muted";
 
 function formatClock(totalSeconds: number): string {
   const seconds = Math.max(0, Math.floor(totalSeconds));
@@ -12,11 +15,29 @@ function formatClock(totalSeconds: number): string {
 
 export function TimerView({ workout }: { workout: Workout }) {
   const { state, controls } = useTimerEngine(workout);
+  // Audio cues on the wall display — remembered per browser so a muted gym
+  // stays muted between sessions.
+  const [muted, setMuted] = useState(() => {
+    try {
+      return localStorage.getItem(MUTED_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const audio = useTimerAudio(state, muted);
   // "TV mode": the timer takes over the whole screen with oversized elements
   // so it reads from across a gym. It also requests true browser fullscreen
   // when available, but the CSS layout is the source of truth so it still
   // works where the Fullscreen API is blocked (e.g. embedded previews).
   const [tv, setTv] = useState(false);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(MUTED_KEY, muted ? "1" : "0");
+    } catch {
+      /* storage unavailable (private mode) — muting still works this session. */
+    }
+  }, [muted]);
 
   useEffect(() => {
     function onFullscreenChange() {
@@ -75,6 +96,14 @@ export function TimerView({ workout }: { workout: Workout }) {
   return (
     <div className={`timer-view ${tv ? "tv" : ""}`}>
       <div className="timer-toolbar">
+        <button
+          className="tv-toggle"
+          onClick={() => setMuted((m) => !m)}
+          aria-pressed={!muted}
+          title={muted ? "Enable timer sounds" : "Mute timer sounds"}
+        >
+          {muted ? "🔇 Sound off" : "🔊 Sound on"}
+        </button>
         <button
           className="tv-toggle"
           onClick={toggleTv}
@@ -143,7 +172,18 @@ export function TimerView({ workout }: { workout: Workout }) {
       )}
 
       <div className="timer-controls">
-        {state.status === "idle" && <button onClick={controls.start}>Start</button>}
+        {state.status === "idle" && (
+          <button
+            onClick={() => {
+              // Start is a user gesture — the only reliable moment to unlock
+              // the audio context so later beeps are allowed to play.
+              audio.unlock();
+              controls.start();
+            }}
+          >
+            Start
+          </button>
+        )}
         {counting && <button onClick={controls.skipCountdown}>Skip countdown</button>}
         {state.status === "running" && <button onClick={controls.pause}>Pause</button>}
         {state.status === "paused" && <button onClick={controls.resume}>Resume</button>}
