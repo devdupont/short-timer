@@ -196,11 +196,15 @@ export function useTimerAudio(state: TimerState, muted: boolean, mode: WorkoutMo
       return;
     }
 
-    // In a single-round EMOM ("every minute do the next thing, once through"),
-    // each minute is the athlete's round unit, so its per-leg boundaries should
-    // chime the round tone rather than the leg tone. Multi-round EMOMs — where
-    // movements cycle across rounds — keep the leg-vs-round distinction.
-    const legCue: CueName = modeRef.current === "emom" && state.totalRounds === 1 ? "round" : "leg";
+    // In an EMOM the minute is the athlete's round unit. When there's a single
+    // round ("every minute do the next thing, once through") — or an unbounded
+    // one that just repeats until stopped, which feels the same — each per-leg
+    // boundary should chime the round tone rather than the leg tone. Only a
+    // bounded multi-round EMOM, where movements cycle across a fixed number of
+    // rounds, keeps the leg-vs-round distinction.
+    const emomMinutesAreRounds =
+      modeRef.current === "emom" && (state.totalRounds === null || state.totalRounds === 1);
+    const legCue: CueName = emomMinutesAreRounds ? "round" : "leg";
 
     // Boundary tones, most-significant first. A round bump wins over a
     // leg/rest change on the same tick.
