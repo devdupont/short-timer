@@ -24,7 +24,7 @@ export function TimerView({ workout }: { workout: Workout }) {
       return false;
     }
   });
-  const audio = useTimerAudio(state, muted);
+  const audio = useTimerAudio(state, muted, workout.mode);
   // "TV mode": the timer takes over the whole screen with oversized elements
   // so it reads from across a gym. It also requests true browser fullscreen
   // when available, but the CSS layout is the source of truth so it still

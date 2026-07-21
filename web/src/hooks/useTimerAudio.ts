@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { TimerState } from "./useTimerEngine";
+import type { WorkoutMode } from "../types";
 
 /**
  * Audio cues for the timer, aimed at the wall-display / TV target where an
@@ -119,11 +120,13 @@ function snapshot(state: TimerState): Snapshot {
   };
 }
 
-export function useTimerAudio(state: TimerState, muted: boolean) {
+export function useTimerAudio(state: TimerState, muted: boolean, mode: WorkoutMode) {
   const ctxRef = useRef<AudioContext | null>(null);
   const prevRef = useRef<Snapshot | null>(null);
   const mutedRef = useRef(muted);
   mutedRef.current = muted;
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
 
   const ensureCtx = useCallback(() => {
     if (ctxRef.current === null) {
@@ -193,6 +196,12 @@ export function useTimerAudio(state: TimerState, muted: boolean) {
       return;
     }
 
+    // In a single-round EMOM ("every minute do the next thing, once through"),
+    // each minute is the athlete's round unit, so its per-leg boundaries should
+    // chime the round tone rather than the leg tone. Multi-round EMOMs — where
+    // movements cycle across rounds — keep the leg-vs-round distinction.
+    const legCue: CueName = modeRef.current === "emom" && state.totalRounds === 1 ? "round" : "leg";
+
     // Boundary tones, most-significant first. A round bump wins over a
     // leg/rest change on the same tick.
     if (curr.round > prev.round) {
@@ -201,7 +210,7 @@ export function useTimerAudio(state: TimerState, muted: boolean) {
       play("rest");
     } else if (curr.phase === "work" && prev.phase === "rest") {
       // Work resuming after a rest, within the same round (block plans).
-      play("leg");
+      play(legCue);
     } else if (
       curr.phase === "work" &&
       curr.remainingSeconds !== null &&
@@ -210,7 +219,7 @@ export function useTimerAudio(state: TimerState, muted: boolean) {
     ) {
       // Rotation leg→leg: the per-leg clock reset without a phase or round
       // change, i.e. we stepped to the next movement in the round.
-      play("leg");
+      play(legCue);
     }
   }, [state, play]);
 
