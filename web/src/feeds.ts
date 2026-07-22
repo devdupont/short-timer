@@ -9,7 +9,13 @@
  * render both without either source leaking assumptions into the other.
  */
 
-import type { FeedKind, GymWodEntry, WodEntry } from "./types";
+import type {
+  Concept2WodEntry,
+  FeedKind,
+  GymWodEntry,
+  HybridWodEntry,
+  WodEntry,
+} from "./types";
 
 /** What the cards need from an entry, common to every source. */
 export interface FeedEntry {
@@ -30,6 +36,12 @@ export interface FeedSpec {
   body(text: string): string;
   /** Sources that program scheduled rest have nothing to send to the timer. */
   isRestDay(text: string): boolean;
+  /**
+   * Copy for "this feed loaded fine and simply has nothing today". A feed that
+   * can be empty for a *configuration* reason says so nearer the user's
+   * config — see `gymEmptyReason` — and falls back to this.
+   */
+  emptyMessage: string;
 }
 
 /** Strip the markdown links and bold markers crossfit.com embeds in wodRaw. */
@@ -74,6 +86,47 @@ export const CROSSFIT_SPEC: FeedSpec = {
   linkLabel: "View on crossfit.com ↗",
   body: crossfitBody,
   isRestDay: isCrossfitRestDay,
+  emptyMessage: "No workouts available from crossfit.com right now.",
+};
+
+/**
+ * Concept2 sends the workout as a headline plus a sentence expanding it, and
+ * the headline is already the card's title — so the body is everything after
+ * it. Both halves still go to the parser: "2/3/2/3/2/3/2 minutes with 1 minute
+ * rest" only means seven intervals if you read the sentence underneath.
+ */
+function concept2Body(text: string): string {
+  const clean = text.replace(/\r\n/g, "\n").trim();
+  const rest = clean.slice(clean.indexOf("\n") + 1).trim();
+  // A day with no description is just the headline; show it rather than nothing.
+  return truncate(rest && clean.includes("\n") ? rest : clean);
+}
+
+export const CONCEPT2_SPEC: FeedSpec = {
+  kind: "concept2",
+  heading: "Concept2",
+  blurb: "The daily erg workout for the RowErg, SkiErg and BikeErg.",
+  linkLabel: "View on Concept2 ↗",
+  body: concept2Body,
+  // Concept2 programs an interval workout every single day — there is no rest
+  // day to recognise.
+  isRestDay: () => false,
+  emptyMessage: "No workouts available from Concept2 right now.",
+};
+
+/**
+ * Hybrid Calisthenics is a fixed rotation of untimed sets, so unlike the other
+ * feeds it has no clock to advertise and no prose to trim — the two lines the
+ * server stores *are* the workout.
+ */
+export const HYBRID_SPEC: FeedSpec = {
+  kind: "hybrid",
+  heading: "Hybrid Calisthenics",
+  blurb: "Today's bodyweight session from the free Hybrid Routine. No clock — just sets.",
+  linkLabel: "View on hybridcalisthenics.com ↗",
+  body: (text) => truncate(text.replace(/\r\n/g, "\n").trim()),
+  isRestDay: (text) => /^\s*(a day of rest|rest day)/i.test(text),
+  emptyMessage: "No workouts available from Hybrid Calisthenics right now.",
 };
 
 export const GYM_SPEC: FeedSpec = {
@@ -86,12 +139,15 @@ export const GYM_SPEC: FeedSpec = {
   // A gym that isn't running a class simply publishes nothing that day, so
   // there's no rest-day text to recognise.
   isRestDay: () => false,
+  emptyMessage: "Your gym hasn't published anything for the last few days.",
 };
 
 export const FEED_SPECS: Record<FeedKind, FeedSpec> = {
   crossfit: CROSSFIT_SPEC,
   gym: GYM_SPEC,
+  concept2: CONCEPT2_SPEC,
+  hybrid: HYBRID_SPEC,
 };
 
-/** Both wire types satisfy `FeedEntry`; this documents that rather than casting at call sites. */
-export type AnyFeedEntry = WodEntry | GymWodEntry;
+/** Every wire type satisfies `FeedEntry`; this documents that rather than casting at call sites. */
+export type AnyFeedEntry = WodEntry | GymWodEntry | Concept2WodEntry | HybridWodEntry;

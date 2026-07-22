@@ -1044,6 +1044,83 @@ button {
   font-size: 15px;
 }
 
+/* ---- Untimed sessions ----
+   Strength work and rest days have no clock to run, so they get a checklist
+   instead. No TV mode here on purpose: a wall display exists to show a clock
+   across a room, and there isn't one — this is read at arm's length. */
+
+.untimed-view {
+  gap: 20px;
+}
+
+.untimed-progress {
+  color: var(--text);
+  font-size: 15px;
+  margin: 0;
+}
+
+.untimed-empty {
+  max-width: 480px;
+}
+
+.untimed-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  width: 100%;
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.untimed-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  text-align: left;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--social-bg);
+  cursor: pointer;
+}
+
+.untimed-item input {
+  margin-top: 3px;
+  accent-color: var(--accent-border);
+  flex-shrink: 0;
+}
+
+.untimed-item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.untimed-item-text strong {
+  color: var(--text-h);
+  font-size: 17px;
+}
+
+.untimed-detail {
+  color: var(--text);
+  font-size: 14px;
+  font-style: normal;
+}
+
+/* Struck through rather than hidden — the list doubles as a record of what
+   you've already done this session. */
+.untimed-item.done .untimed-item-text strong {
+  text-decoration: line-through;
+  color: var(--text);
+}
+
+.untimed-item.done {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+}
+
 /* ---- TV / wall-display mode ----
    The timer takes over the whole viewport and every element scales with the
    screen so it stays legible from across a room. Sizes use min(vw, vh) so the

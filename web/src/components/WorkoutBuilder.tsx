@@ -338,6 +338,27 @@ export function WorkoutBuilder({
             </label>
           </div>
 
+          {/* Per-leg durations, for ladders and pyramids whose legs differ in
+              length. Left blank they inherit the workout-level work/rest
+              above, which is all a uniform interval workout needs. */}
+          {showIntervalFields && (
+            <div className="field-grid two">
+              <DurationField
+                label="Leg work"
+                optional
+                hint="Overrides the work/rest above for this leg only — how a 5/4/3/2/1 ladder is built."
+                seconds={segment.work_seconds}
+                onChange={(work_seconds) => updateSegment(segIndex, { work_seconds })}
+              />
+              <DurationField
+                label="Leg rest"
+                optional
+                seconds={segment.rest_seconds}
+                onChange={(rest_seconds) => updateSegment(segIndex, { rest_seconds })}
+              />
+            </div>
+          )}
+
           <div className="movement-list">
             {segment.movements.map((movement, movIndex) => (
               <div className="movement-item" key={movIndex}>

@@ -7,6 +7,7 @@ from fastapi import FastAPI, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from short_timer import concept2_cache, hybrid_cache
 from short_timer.config import get_settings
 from short_timer.db import (
     backfill_owner_ids,
@@ -15,22 +16,22 @@ from short_timer.db import (
     get_database,
 )
 from short_timer.errors import register_error_handlers
-from short_timer.routers import auth, me, wodify, wods, workouts
-from short_timer.users import ensure_default_user
-from short_timer.wodify_cache import (
-    REFRESH_INTERVAL_SECONDS as WODIFY_REFRESH_INTERVAL_SECONDS,
-)
-from short_timer.wodify_cache import refresh_all_configured
 from short_timer.parse_cache import (
     backfill_parse_sources,
     migrate_wod_parses,
     prune_expired_parses,
 )
+from short_timer.routers import auth, concept2, hybrid, me, wodify, wods, workouts
+from short_timer.users import ensure_default_user
 from short_timer.wod_cache import (
     REFRESH_INTERVAL_SECONDS,
     ensure_wods_parsed,
     refresh_wod_cache,
 )
+from short_timer.wodify_cache import (
+    REFRESH_INTERVAL_SECONDS as WODIFY_REFRESH_INTERVAL_SECONDS,
+)
+from short_timer.wodify_cache import refresh_all_configured
 
 logger = logging.getLogger(__name__)
 
@@ -46,9 +47,41 @@ async def _refresh_wods_daily() -> None:
             await ensure_wods_parsed()
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001 - never let a bad fetch kill the loop
+        except Exception:  # never let a bad fetch kill the loop
             logger.exception("WOD cache refresh failed; will retry tomorrow.")
         await asyncio.sleep(REFRESH_INTERVAL_SECONDS)
+
+
+async def _refresh_concept2_daily() -> None:
+    """Keep the Concept2 cache warm, so no request waits on log.concept2.com."""
+    while True:
+        try:
+            await concept2_cache.refresh_concept2_cache()
+            # Runs even when the fetch was skipped as fresh, so a day that
+            # failed to parse earlier gets another attempt.
+            await concept2_cache.ensure_wods_parsed()
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # never let a bad fetch kill the loop
+            logger.exception("Concept2 cache refresh failed; will retry tomorrow.")
+        await asyncio.sleep(concept2_cache.REFRESH_INTERVAL_SECONDS)
+
+
+async def _refresh_hybrid_daily() -> None:
+    """Keep the Hybrid rotation warm.
+
+    Checked daily but only re-fetched weekly (see `MIN_REFRESH_INTERVAL`) — the
+    routine is a fixed rotation, so there's nothing new to find most days.
+    """
+    while True:
+        try:
+            await hybrid_cache.refresh_hybrid_cache()
+            await hybrid_cache.ensure_wods_parsed()
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # never let a bad fetch kill the loop
+            logger.exception("Hybrid rotation refresh failed; will retry tomorrow.")
+        await asyncio.sleep(hybrid_cache.REFRESH_INTERVAL_SECONDS)
 
 
 async def _refresh_gyms_periodically() -> None:
@@ -62,7 +95,7 @@ async def _refresh_gyms_periodically() -> None:
             await refresh_all_configured()
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001 - never let a bad fetch kill the loop
+        except Exception:  # never let a bad fetch kill the loop
             logger.exception("Wodify refresh failed; will retry next cycle.")
         await asyncio.sleep(WODIFY_REFRESH_INTERVAL_SECONDS)
 
@@ -79,7 +112,7 @@ async def _prune_parses_monthly() -> None:
             await prune_expired_parses()
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001 - a failed sweep shouldn't kill the loop
+        except Exception:  # a failed sweep shouldn't kill the loop
             logger.exception("Parse pool sweep failed; will retry next cycle.")
         await asyncio.sleep(_PRUNE_INTERVAL_SECONDS)
 
@@ -106,11 +139,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 moved,
                 labelled,
             )
-    except Exception:  # noqa: BLE001 - startup maintenance is non-critical
+    except Exception:  # startup maintenance is non-critical
         logger.exception("Skipped startup database maintenance.")
 
     background = [
         asyncio.create_task(_refresh_wods_daily()),
+        asyncio.create_task(_refresh_concept2_daily()),
+        asyncio.create_task(_refresh_hybrid_daily()),
         asyncio.create_task(_refresh_gyms_periodically()),
         asyncio.create_task(_prune_parses_monthly()),
     ]
@@ -141,6 +176,8 @@ app.include_router(auth.router)
 app.include_router(me.router)
 app.include_router(workouts.router)
 app.include_router(wods.router)
+app.include_router(concept2.router)
+app.include_router(hybrid.router)
 app.include_router(wodify.router)
 
 
@@ -160,7 +197,7 @@ async def ready() -> JSONResponse:
     """
     try:
         await get_database().command("ping")
-    except Exception:  # noqa: BLE001 - any failure means "not ready"
+    except Exception:  # any failure means "not ready"
         logger.exception("Readiness check failed.")
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

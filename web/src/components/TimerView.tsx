@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useTimerEngine } from "../hooks/useTimerEngine";
 import { useTimerAudio } from "../hooks/useTimerAudio";
 import type { Workout } from "../types";
-import { MODE_LABELS } from "../types";
+import { isUntimed, MODE_LABELS } from "../types";
 
 const MUTED_KEY = "short-timer:muted";
 
@@ -13,7 +13,94 @@ function formatClock(totalSeconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+/**
+ * Untimed sessions: work through the list and tick things off.
+ *
+ * Checked state is deliberately session-local. It's a scratchpad for "where am
+ * I right now", not a training log — persisting it would imply a history the
+ * app doesn't keep, and would need answers for what a checkmark means the next
+ * day.
+ */
+function UntimedSession({ workout }: { workout: Workout }) {
+  const items = workout.segments
+    .map((segment) => {
+      const movementText = segment.movements
+        .map((m) => [m.reps, m.name, m.distance, m.load].filter(Boolean).join(" "))
+        .filter(Boolean)
+        .join(", ");
+      // A note usually restates the set count in the source's own words
+      // ("2-3 sets"), which is truer than the single number the parser had to
+      // round it to — so prefer it, and fall back to `rounds` when absent.
+      // Showing both gives you "3 sets — 2-3 sets", which contradicts itself.
+      const note = segment.movements.find((m) => m.notes)?.notes ?? null;
+      const sets = segment.rounds ? `${segment.rounds} sets` : null;
+      return {
+        title: movementText || segment.label || "",
+        detail: note ?? sets ?? "",
+      };
+    })
+    .filter((item) => item.title);
+
+  const [done, setDone] = useState<boolean[]>(() => items.map(() => false));
+  const completed = done.filter(Boolean).length;
+
+  return (
+    <div className="timer-view untimed-view">
+      <div className="timer-header">
+        <h2>{workout.name}</h2>
+        <p className="mode-badge">{MODE_LABELS[workout.mode]}</p>
+      </div>
+
+      {workout.description && <p className="section-sub">{workout.description}</p>}
+
+      {items.length === 0 ? (
+        <p className="section-sub untimed-empty">
+          Nothing to time here — take the day as it comes.
+        </p>
+      ) : (
+        <>
+          <p className="untimed-progress" aria-live="polite">
+            {completed} of {items.length} done
+          </p>
+          <ul className="untimed-list">
+            {items.map((item, i) => (
+              <li key={i}>
+                <label className={done[i] ? "untimed-item done" : "untimed-item"}>
+                  <input
+                    type="checkbox"
+                    checked={done[i]}
+                    onChange={(e) =>
+                      setDone((prev) => prev.map((v, j) => (j === i ? e.target.checked : v)))
+                    }
+                  />
+                  <span className="untimed-item-text">
+                    <strong>{item.title}</strong>
+                    {item.detail && <em className="untimed-detail">{item.detail}</em>}
+                  </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+          <div className="timer-controls">
+            <button onClick={() => setDone(items.map(() => false))}>Reset</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function TimerView({ workout }: { workout: Workout }) {
+  // Dispatch before any timer hook runs, so the clock view's hooks stay
+  // unconditional rather than being called for a workout with no clock.
+  return isUntimed(workout) ? (
+    <UntimedSession workout={workout} />
+  ) : (
+    <ClockView workout={workout} />
+  );
+}
+
+function ClockView({ workout }: { workout: Workout }) {
   const { state, controls } = useTimerEngine(workout);
   // Audio cues on the wall display — remembered per browser so a muted gym
   // stays muted between sessions.

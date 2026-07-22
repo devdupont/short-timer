@@ -195,5 +195,35 @@
     "expected_movements": [
       "assault bike"
     ]
+  },
+  {
+    "name": "5/4/3/2/1 minutes with 2 minutes rest",
+    "category": "erg",
+    "source_text": "5/4/3/2/1 minutes with 2 minutes rest\n\nIntervals of 5 minutes, 4 minutes, 3 minutes, 2 minutes, 1 minute. 2 minutes rest between each interval.",
+    "expected_mode": "interval",
+    "expected_segment_work_seconds": [
+      300,
+      240,
+      180,
+      120,
+      60
+    ],
+    "expected_movements": []
+  },
+  {
+    "name": "2/3/2/3/2/3/2 minutes with 1 minute rest",
+    "category": "erg",
+    "source_text": "2/3/2/3/2/3/2 minutes with 1 minute rest\n\nSeven alternating two and three minute intervals. One minute rest between each interval.",
+    "expected_mode": "interval",
+    "expected_segment_work_seconds": [
+      120,
+      180,
+      120,
+      180,
+      120,
+      180,
+      120
+    ],
+    "expected_movements": []
   }
 ]

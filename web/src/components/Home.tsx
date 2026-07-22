@@ -3,7 +3,9 @@ import {
   ApiError,
   getMe,
   getWorkout,
+  listConcept2Wods,
   listGymWods,
+  listHybridWods,
   listWods,
   loadWorkoutFromText,
   parseWorkout,
@@ -45,7 +47,8 @@ function gymEmptyReason(me: Me, state: FeedState): string {
   if (!state.configured) {
     return "Your gym connection is incomplete — check that the location and program in Settings match your gym's Wodify setup exactly.";
   }
-  return "Your gym hasn't published anything for the last few days.";
+  // Connected, switched on, and simply quiet — the ordinary empty case.
+  return FEED_SPECS.gym.emptyMessage;
 }
 
 export function Home({
@@ -84,11 +87,18 @@ export function Home({
       const results = await Promise.all(
         wanted.map(async (feed): Promise<[FeedKind, FeedState]> => {
           try {
-            if (feed.kind === "crossfit") {
-              return [feed.kind, { ...EMPTY, entries: await listWods() }];
+            switch (feed.kind) {
+              case "crossfit":
+                return [feed.kind, { ...EMPTY, entries: await listWods() }];
+              case "concept2":
+                return [feed.kind, { ...EMPTY, entries: await listConcept2Wods() }];
+              case "hybrid":
+                return [feed.kind, { ...EMPTY, entries: await listHybridWods() }];
+              case "gym": {
+                const gym = await listGymWods();
+                return [feed.kind, { entries: gym.wods, configured: gym.configured, error: null }];
+              }
             }
-            const gym = await listGymWods();
-            return [feed.kind, { entries: gym.wods, configured: gym.configured, error: null }];
           } catch (err) {
             const message =
               err instanceof ApiError ? err.message : "Could not reach this feed right now.";
@@ -194,7 +204,7 @@ export function Home({
                       </button>
                     </>
                   ) : (
-                    "No workouts available from crossfit.com right now."
+                    spec.emptyMessage
                   )}
                 </div>
               }
