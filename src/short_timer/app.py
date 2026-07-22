@@ -15,8 +15,12 @@ from short_timer.db import (
     get_database,
 )
 from short_timer.errors import register_error_handlers
-from short_timer.routers import auth, me, wods, workouts
+from short_timer.routers import auth, me, wodify, wods, workouts
 from short_timer.users import ensure_default_user
+from short_timer.wodify_cache import (
+    REFRESH_INTERVAL_SECONDS as WODIFY_REFRESH_INTERVAL_SECONDS,
+)
+from short_timer.wodify_cache import refresh_all_configured
 from short_timer.parse_cache import (
     backfill_parse_sources,
     migrate_wod_parses,
@@ -45,6 +49,22 @@ async def _refresh_wods_daily() -> None:
         except Exception:  # noqa: BLE001 - never let a bad fetch kill the loop
             logger.exception("WOD cache refresh failed; will retry tomorrow.")
         await asyncio.sleep(REFRESH_INTERVAL_SECONDS)
+
+
+async def _refresh_gyms_periodically() -> None:
+    """Keep each configured gym's workouts warm, so no request waits on Wodify.
+
+    More often than the crossfit.com refresh: a gym may post the day's workout
+    at any hour, and there's no single publish time to anchor to.
+    """
+    while True:
+        try:
+            await refresh_all_configured()
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - never let a bad fetch kill the loop
+            logger.exception("Wodify refresh failed; will retry next cycle.")
+        await asyncio.sleep(WODIFY_REFRESH_INTERVAL_SECONDS)
 
 
 #: User-submitted parses age out; sweep for them monthly. The loop runs once
@@ -91,6 +111,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     background = [
         asyncio.create_task(_refresh_wods_daily()),
+        asyncio.create_task(_refresh_gyms_periodically()),
         asyncio.create_task(_prune_parses_monthly()),
     ]
     try:
@@ -120,6 +141,7 @@ app.include_router(auth.router)
 app.include_router(me.router)
 app.include_router(workouts.router)
 app.include_router(wods.router)
+app.include_router(wodify.router)
 
 
 @app.get("/api/health")

@@ -1,4 +1,4 @@
-import type { Me, UserConfigUpdate, WodEntry, Workout } from "./types";
+import type { GymFeed, Me, UserConfigUpdate, WodEntry, Workout } from "./types";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
@@ -66,6 +66,11 @@ export function loadWorkoutFromText(text: string, nameHint?: string): Promise<Wo
 
 export function listWods(days?: number): Promise<WodEntry[]> {
   return request(`/api/wods${days ? `?days=${days}` : ""}`);
+}
+
+/** Recent workouts from the user's own gym, if they've connected one. */
+export function listGymWods(days?: number): Promise<GymFeed> {
+  return request(`/api/gym/wods${days ? `?days=${days}` : ""}`);
 }
 
 /** Add the classic benchmark workouts (Murph, Cindy, Fran, …) to the library. */

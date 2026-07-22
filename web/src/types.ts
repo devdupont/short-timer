@@ -42,6 +42,25 @@ export interface WodEntry {
   saved_workout_id?: string | null;
 }
 
+/** One day's workout from the user's configured gym. Same shape as WodEntry. */
+export interface GymWodEntry {
+  date: string;
+  title: string;
+  text: string;
+  url: string;
+  saved_workout_id?: string | null;
+}
+
+/**
+ * The gym feed. `configured` is false when the user hasn't connected a gym (or
+ * has one saved but switched off) — an empty feed for that reason isn't an
+ * error, and the UI should say so rather than showing a generic "nothing here".
+ */
+export interface GymFeed {
+  configured: boolean;
+  wods: GymWodEntry[];
+}
+
 /** A stored credential as the server describes it — never the value itself. */
 export interface SecretStatus {
   is_set: boolean;
