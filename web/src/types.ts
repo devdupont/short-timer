@@ -13,6 +13,13 @@ export interface WorkoutSegment {
   label?: string | null;
   rounds?: number | null;
   rep_scheme?: number[] | null;
+  /**
+   * This leg's own work/rest, for interval workouts whose legs differ in
+   * length (a "5/4/3/2/1 minutes" ladder). Both fall back to the
+   * workout-level values, so uniform intervals leave them unset.
+   */
+  work_seconds?: number | null;
+  rest_seconds?: number | null;
   movements: Movement[];
 }
 
@@ -51,6 +58,15 @@ export interface GymWodEntry {
   saved_workout_id?: string | null;
 }
 
+/** One day's erg workout from Concept2. Same shape as WodEntry. */
+export interface Concept2WodEntry {
+  date: string;
+  title: string;
+  text: string;
+  url: string;
+  saved_workout_id?: string | null;
+}
+
 /**
  * The gym feed. `configured` is false when the user hasn't connected a gym (or
  * has one saved but switched off) — an empty feed for that reason isn't an
@@ -81,8 +97,17 @@ export interface WodifyMemberConfig {
   enabled: boolean;
 }
 
+/** One day of the Hybrid Calisthenics rotation. Same shape as WodEntry. */
+export interface HybridWodEntry {
+  date: string;
+  title: string;
+  text: string;
+  url: string;
+  saved_workout_id?: string | null;
+}
+
 /** A workout source the home page knows how to render. */
-export type FeedKind = "gym" | "crossfit";
+export type FeedKind = "gym" | "crossfit" | "concept2" | "hybrid";
 
 /**
  * Whether a feed appears on the home page. Distinct from the `enabled` on a
@@ -134,6 +159,19 @@ export const MODE_LABELS: Record<WorkoutMode, string> = {
   interval: "Interval",
   custom: "Custom",
 };
+
+/**
+ * Whether this workout has a clock to run at all.
+ *
+ * A strength session ("Pushups, 2-3 sets, as many as you can") and a rest day
+ * are both real workouts with nothing to count. Forcing them through the timer
+ * gives you a stopwatch measuring nothing, so they get a checklist instead. A
+ * `custom` workout that *does* carry a cap still gets the clock — someone
+ * deliberately put a number on it.
+ */
+export function isUntimed(workout: Workout): boolean {
+  return workout.mode === "custom" && !workout.time_cap_seconds;
+}
 
 export const MODE_HINTS: Record<WorkoutMode, string> = {
   for_time: "Finish the work as fast as possible, optionally against a time cap.",

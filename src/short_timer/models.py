@@ -53,11 +53,20 @@ class WorkoutSegment(BaseModel):
     `rounds` and `rep_scheme` let a segment nest its own repetition, which is
     what a workout like Murph needs: an outer for-time clock wrapping an inner
     "20 rounds of 5 pull-ups / 10 push-ups / 15 air squats" partition.
+
+    `work_seconds` and `rest_seconds` extend that same idea to the clock: they
+    let one leg run for a different length than its neighbours. A "5/4/3/2/1
+    minutes with 2 minutes rest" ladder is five segments with five different
+    work durations, which the workout-level scalars alone can't express. Both
+    fall back to the workout-level values, so a uniform "6 x 3 minutes" leaves
+    them unset and reads exactly as it did before these existed.
     """
 
     label: str | None = None
     rounds: int | None = None
     rep_scheme: list[int] | None = None
+    work_seconds: int | None = None
+    rest_seconds: int | None = None
     movements: list[Movement] = Field(default_factory=list)
 
 
@@ -171,12 +180,25 @@ class FeedKind(StrEnum):
 
     GYM = "gym"
     CROSSFIT = "crossfit"
+    CONCEPT2 = "concept2"
+    HYBRID = "hybrid"
 
 
 #: Order a user sees before they reorder anything. Their own gym outranks a
 #: public feed: if someone went to the trouble of connecting a box, that's the
 #: programming they came for.
-DEFAULT_FEED_ORDER: tuple[FeedKind, ...] = (FeedKind.GYM, FeedKind.CROSSFIT)
+DEFAULT_FEED_ORDER: tuple[FeedKind, ...] = (
+    FeedKind.GYM,
+    FeedKind.CROSSFIT,
+    FeedKind.CONCEPT2,
+    FeedKind.HYBRID,
+)
+
+#: Feeds a brand-new account starts with switched on. Anything outside this set
+#: exists but stays dark until the user asks for it — an erg feed is noise to
+#: someone who doesn't own an erg. Kept separate from `DEFAULT_FEED_ORDER` so a
+#: feed can have a sensible *position* without being on by default.
+DEFAULT_ENABLED_FEEDS: frozenset[FeedKind] = frozenset({FeedKind.GYM, FeedKind.CROSSFIT})
 
 
 class FeedPref(BaseModel):
@@ -193,7 +215,9 @@ class FeedPref(BaseModel):
 
 
 def default_feeds() -> list[FeedPref]:
-    return [FeedPref(kind=kind) for kind in DEFAULT_FEED_ORDER]
+    return [
+        FeedPref(kind=kind, enabled=kind in DEFAULT_ENABLED_FEEDS) for kind in DEFAULT_FEED_ORDER
+    ]
 
 
 def normalize_feeds(feeds: list[FeedPref]) -> list[FeedPref]:
@@ -202,13 +226,21 @@ def normalize_feeds(feeds: list[FeedPref]) -> list[FeedPref]:
     Config written before a `FeedKind` existed simply won't list it, and a
     hand-edited document could repeat one. Rather than migrating records, every
     read passes through here — a new source shows up for existing users at its
-    default position, enabled.
+    default position.
+
+    It shows up *switched off*, regardless of `DEFAULT_ENABLED_FEEDS`. Shipping
+    a feed shouldn't rearrange the home page of someone who already had one
+    they were happy with; the defaults apply to accounts that have yet to
+    express a preference, not to existing ones. A feed the caller does mention
+    keeps whatever `enabled` it came with, so this never fights a real choice.
     """
     seen: dict[FeedKind, FeedPref] = {}
     for feed in feeds:
         seen.setdefault(feed.kind, feed)
     ordered = list(seen.values())
-    ordered.extend(FeedPref(kind=kind) for kind in DEFAULT_FEED_ORDER if kind not in seen)
+    ordered.extend(
+        FeedPref(kind=kind, enabled=False) for kind in DEFAULT_FEED_ORDER if kind not in seen
+    )
     return ordered
 
 

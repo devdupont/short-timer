@@ -90,9 +90,7 @@ async def test_member_fetch_returns_workout(client: httpx.AsyncClient) -> None:
 
 @respx.mock
 async def test_member_fetch_sends_expected_params(client: httpx.AsyncClient) -> None:
-    route = respx.get(WHITEBOARD).mock(
-        return_value=httpx.Response(200, html=WHITEBOARD_HTML)
-    )
+    route = respx.get(WHITEBOARD).mock(return_value=httpx.Response(200, html=WHITEBOARD_HTML))
     await fetch_member_wod(
         client, DAY, whiteboard_key="wb-key", location="Main", program="CrossFit"
     )
@@ -145,9 +143,7 @@ async def test_owner_fetch_reads_formatted_wod(client: httpx.AsyncClient) -> Non
     respx.get(PROGRAM_API).mock(
         return_value=httpx.Response(200, json={"APIWod": {"FormattedWOD": FORMATTED_WOD_HTML}})
     )
-    wod = await fetch_owner_wod(
-        client, DAY, api_key="k", location="Main", program="CrossFit"
-    )
+    wod = await fetch_owner_wod(client, DAY, api_key="k", location="Main", program="CrossFit")
     assert wod is not None
     assert "15 Kettlebell Swings 53 lb" in wod.text
     assert "<p>" not in wod.text
@@ -183,9 +179,7 @@ async def test_owner_fetch_tolerates_envelope_variations(client: httpx.AsyncClie
 @respx.mock
 async def test_owner_rejected_key_is_skipped(client: httpx.AsyncClient) -> None:
     respx.get(PROGRAM_API).mock(return_value=httpx.Response(401))
-    assert (
-        await fetch_owner_wod(client, DAY, api_key="bad", location="L", program="P") is None
-    )
+    assert await fetch_owner_wod(client, DAY, api_key="bad", location="L", program="P") is None
 
 
 @respx.mock

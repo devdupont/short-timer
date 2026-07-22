@@ -93,9 +93,7 @@ async def test_oversized_paste_is_rejected_before_the_model(
 
     monkeypatch.setattr("short_timer.routers.workouts.parse_workout_text", exploding_parse)
 
-    response = await authed_client.post(
-        "/api/workouts/parse", json={"text": "x" * 20_001}
-    )
+    response = await authed_client.post("/api/workouts/parse", json={"text": "x" * 20_001})
     assert response.status_code == 422
 
 
@@ -106,9 +104,14 @@ async def test_empty_paste_is_rejected(authed_client: AsyncClient) -> None:
 @pytest.mark.parametrize(
     ("error", "expected_status"),
     [
-        (anthropic.APITimeoutError(request=httpx.Request("POST", "https://api.anthropic.com")), 504),
         (
-            anthropic.APIConnectionError(request=httpx.Request("POST", "https://api.anthropic.com")),
+            anthropic.APITimeoutError(request=httpx.Request("POST", "https://api.anthropic.com")),
+            504,
+        ),
+        (
+            anthropic.APIConnectionError(
+                request=httpx.Request("POST", "https://api.anthropic.com")
+            ),
             503,
         ),
     ],

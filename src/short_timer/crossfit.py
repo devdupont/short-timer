@@ -28,6 +28,7 @@ def is_rest_day(text: str) -> bool:
     """crossfit.com programs scheduled rest days, which have no workout to time."""
     return bool(_REST_DAY.match(text.strip()))
 
+
 USER_AGENT = "short-timer/0.1 (+https://github.com/devdupont/short-timer)"
 _API_URL = "https://www.crossfit.com/workout/{year}/{month:02d}/{day:02d}"
 _REQUEST_TIMEOUT = 15.0

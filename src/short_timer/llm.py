@@ -42,6 +42,20 @@ emom/tabata/interval.
 of the overall structure (e.g. Murph's "20 rounds of 5 pull-ups, 10 \
 push-ups, 15 air squats" nested between two 1-mile runs).
 
+When the legs of an interval workout are *not all the same length* — a ladder \
+or pyramid like "5/4/3/2/1 minutes with 2 minutes rest", or "2/3/2/3/2/3/2 \
+minutes with 1 minute rest" — emit one segment per leg and put that leg's own \
+duration in the segment's `work_seconds`, with the recovery that follows it in \
+the segment's `rest_seconds`. Never write a duration into a movement's `notes` \
+and leave `work_seconds` unset: the clock can only read the numeric fields, so \
+a duration in prose is a duration the timer cannot run.
+
+In that case the segments are a *sequence*, not a rotation, so `rounds` is how \
+many times the whole sequence repeats — which is usually 1. Only use the \
+workout-level `work_seconds`/`rest_seconds` when every leg really is the same \
+length (e.g. "6 x 3 minutes with 2 minutes light" is `rounds` 6, \
+`work_seconds` 180, `rest_seconds` 120, and needs no per-segment durations).
+
 Always call `emit_workout` exactly once with your best-effort structured \
 reading of the workout. Do not invent movements or numbers that aren't \
 implied by the text. Some interval workouts (e.g. "30 seconds on, 15 \
@@ -86,6 +100,16 @@ _WORKOUT_TOOL: ToolParam = {
                         "label": {"type": "string"},
                         "rounds": {"type": "integer"},
                         "rep_scheme": {"type": "array", "items": {"type": "integer"}},
+                        "work_seconds": {
+                            "type": "integer",
+                            "description": "This leg's own work duration, when the legs of the "
+                            "workout differ in length. Falls back to the workout-level value.",
+                        },
+                        "rest_seconds": {
+                            "type": "integer",
+                            "description": "Recovery following this leg, when the legs of the "
+                            "workout differ in length. Falls back to the workout-level value.",
+                        },
                         "movements": {
                             "type": "array",
                             "items": {

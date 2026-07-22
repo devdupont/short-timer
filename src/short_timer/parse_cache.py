@@ -31,6 +31,8 @@ _DROPPED_FIELDS = ("id", "created_at", "updated_at", "owner_id", "source_hash")
 
 #: Provenance, which decides how long an entry is kept.
 SOURCE_CROSSFIT = "crossfit"
+SOURCE_CONCEPT2 = "concept2"
+SOURCE_HYBRID = "hybrid"
 SOURCE_USER = "user"
 #: A gym's own programming, pulled from Wodify. Deliberately *not* permanent
 #: like crossfit.com: it belongs to one gym rather than to a public commons,
@@ -40,9 +42,15 @@ SOURCE_USER = "user"
 #: a gym's programming doesn't linger indefinitely after someone leaves.
 SOURCE_WODIFY = "wodify"
 
-#: crossfit.com workouts are public and endlessly re-used, so they're kept
-#: indefinitely. Everything else is somebody's content, so it ages out — the
-#: sweep below exempts only crossfit.com.
+#: Sources that publish to everyone, where the same text keeps coming back and
+#: nobody's content is being held. Entries from these are kept indefinitely;
+#: everything else ages out under `USER_RETENTION`. Concept2 in particular
+#: re-runs its workouts across years, so an expiry would mean re-paying for a
+#: parse of text we've already seen.
+PERMANENT_SOURCES = frozenset({SOURCE_CROSSFIT, SOURCE_CONCEPT2, SOURCE_HYBRID})
+
+#: How long a non-permanent entry survives. A pruned entry costs at most one
+#: re-parse if that text ever shows up again.
 USER_RETENTION = timedelta(days=365)
 
 
@@ -60,9 +68,11 @@ async def remember_parse(workout: Workout, *, source: str = SOURCE_USER) -> bool
     digest = source_hash(workout.source_text)
     set_fields: dict[str, object] = {"source_hash": digest, "parsed": _payload(workout)}
     insert_fields: dict[str, object] = {"created_at": datetime.now(UTC)}
-    # Provenance only ever gets promoted: a crossfit.com parse marks the entry
-    # permanent, while a user parse must not demote an already-permanent one.
-    if source == SOURCE_CROSSFIT:
+    # Provenance only ever gets promoted: a parse from a permanent source marks
+    # the entry permanent, while a user parse must not demote one that already
+    # is. (Two permanent sources can't collide here — they'd have to publish
+    # byte-identical text, and if they did, either label is correct.)
+    if source in PERMANENT_SOURCES:
         set_fields["source"] = source
     else:
         insert_fields["source"] = source
@@ -74,16 +84,17 @@ async def remember_parse(workout: Workout, *, source: str = SOURCE_USER) -> bool
     return True
 
 
-async def mark_permanent(text: str) -> bool:
-    """Promote an existing entry to permanent retention.
+async def mark_permanent(text: str, *, source: str = SOURCE_CROSSFIT) -> bool:
+    """Promote an existing entry to permanent retention under `source`.
 
-    A user may paste a workout before the daily task gets to that day. The
-    text is still crossfit.com's, so it shouldn't age out on the user
-    retention clock — promote it without re-paying for a parse.
+    A user may paste a workout before the daily task gets to that day. The text
+    is still the feed's, so it shouldn't age out on the user retention clock —
+    promote it without re-paying for a parse. An entry that's already permanent
+    is left alone, so this reports whether it changed anything.
     """
     result = await get_parse_cache_collection().update_one(
-        {"_id": source_hash(text), "source": {"$ne": SOURCE_CROSSFIT}},
-        {"$set": {"source": SOURCE_CROSSFIT}},
+        {"_id": source_hash(text), "source": {"$nin": list(PERMANENT_SOURCES)}},
+        {"$set": {"source": source}},
     )
     return result.modified_count > 0
 
@@ -91,12 +102,11 @@ async def mark_permanent(text: str) -> bool:
 async def prune_expired_parses(*, now: datetime | None = None) -> int:
     """Drop user-submitted parses past the retention window.
 
-    crossfit.com entries are exempt. A pruned entry costs at most one re-parse
-    if that text ever shows up again.
+    Entries from `PERMANENT_SOURCES` are exempt.
     """
     cutoff = (now or datetime.now(UTC)) - USER_RETENTION
     result = await get_parse_cache_collection().delete_many(
-        {"source": {"$ne": SOURCE_CROSSFIT}, "created_at": {"$lt": cutoff}}
+        {"source": {"$nin": list(PERMANENT_SOURCES)}, "created_at": {"$lt": cutoff}}
     )
     removed = int(result.deleted_count)
     if removed:

@@ -1,4 +1,12 @@
-import type { GymFeed, Me, UserConfigUpdate, WodEntry, Workout } from "./types";
+import type {
+  Concept2WodEntry,
+  GymFeed,
+  HybridWodEntry,
+  Me,
+  UserConfigUpdate,
+  WodEntry,
+  Workout,
+} from "./types";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
@@ -71,6 +79,16 @@ export function listWods(days?: number): Promise<WodEntry[]> {
 /** Recent workouts from the user's own gym, if they've connected one. */
 export function listGymWods(days?: number): Promise<GymFeed> {
   return request(`/api/gym/wods${days ? `?days=${days}` : ""}`);
+}
+
+/** Recent daily erg workouts from Concept2 (RowErg, SkiErg and BikeErg). */
+export function listConcept2Wods(days?: number): Promise<Concept2WodEntry[]> {
+  return request(`/api/concept2/wods${days ? `?days=${days}` : ""}`);
+}
+
+/** The Hybrid Calisthenics weekly rotation, projected onto recent dates. */
+export function listHybridWods(days?: number): Promise<HybridWodEntry[]> {
+  return request(`/api/hybrid/wods${days ? `?days=${days}` : ""}`);
 }
 
 /** Add the classic benchmark workouts (Murph, Cindy, Fran, …) to the library. */

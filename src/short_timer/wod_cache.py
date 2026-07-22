@@ -123,7 +123,7 @@ async def ensure_wods_parsed(limit: int = CACHE_DAYS) -> int:
         title = str(doc.get("title") or "") or None
         try:
             workout = await parse_workout_text(text, name_hint=title)
-        except Exception:  # noqa: BLE001 - one bad day shouldn't stop the rest
+        except Exception:  # one bad day shouldn't stop the rest
             logger.exception("Could not pre-parse WOD %s", doc.get("date"))
             continue
         await remember_parse(workout, source=SOURCE_CROSSFIT)

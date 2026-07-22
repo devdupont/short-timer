@@ -211,9 +211,7 @@ async def fetch_recent_owner_wods(
     async with httpx.AsyncClient(follow_redirects=True) as client:
         results = await asyncio.gather(
             *(
-                fetch_owner_wod(
-                    client, day, api_key=api_key, location=location, program=program
-                )
+                fetch_owner_wod(client, day, api_key=api_key, location=location, program=program)
                 for day in targets
             )
         )

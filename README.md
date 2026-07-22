@@ -47,9 +47,13 @@ Generate a session secret with `python -c "import secrets; print(secrets.token_u
 
 ```bash
 hatch run test         # pytest — mocks Mongo and the Anthropic API, no network needed
-hatch fmt              # ruff lint + format
+hatch check code       # ruff lint      (add --fix to apply)
+hatch check fmt        # ruff format    (add --fix to apply)
 hatch run types        # mypy --strict over src/
 ```
+
+All four should pass before a change lands. `hatch fmt` still works but is
+deprecated in favour of the two `hatch check` commands above.
 
 The parser tests in `tests/test_llm_parser.py` include a `live` set,
 parametrized over `tests/fixtures/workouts.json`, that call the real

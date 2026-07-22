@@ -122,9 +122,16 @@ async def test_fixture_parses_to_expected_shape(fixture: dict[str, Any]) -> None
         assert workout.rest_seconds == fixture["expected_rest_seconds"]
     if "expected_min_segments" in fixture:
         assert len(workout.segments) >= fixture["expected_min_segments"]
+    if "expected_segment_work_seconds" in fixture:
+        # A ladder's legs differ in length, so the durations have to land in the
+        # segments — a duration left in prose is one the timer can't run.
+        expected_legs = fixture["expected_segment_work_seconds"]
+        assert [s.work_seconds for s in workout.segments] == expected_legs
 
+    # Interval legs often name no movement at all ("30 seconds on, 15 off"), so
+    # skip the unnamed ones rather than tripping over a None.
     all_movement_names = " | ".join(
-        m.name.lower() for segment in workout.segments for m in segment.movements
+        m.name.lower() for segment in workout.segments for m in segment.movements if m.name
     )
     for expected_movement in fixture["expected_movements"]:
         assert expected_movement in all_movement_names, (

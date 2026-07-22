@@ -35,6 +35,16 @@ def get_wod_cache_collection() -> AsyncCollection[dict[str, Any]]:
     return get_database()["wod_cache"]
 
 
+def get_concept2_cache_collection() -> AsyncCollection[dict[str, Any]]:
+    """Cached Concept2 erg Workouts of the Day, keyed by date."""
+    return get_database()["concept2_cache"]
+
+
+def get_hybrid_cache_collection() -> AsyncCollection[dict[str, Any]]:
+    """The Hybrid Calisthenics weekly rotation — a single document, not dated rows."""
+    return get_database()["hybrid_cache"]
+
+
 def get_parse_cache_collection() -> AsyncCollection[dict[str, Any]]:
     """Shared pool of parsed workouts, keyed by source-text hash (`_id`)."""
     return get_database()["parse_cache"]
@@ -61,6 +71,7 @@ async def ensure_indexes() -> None:
     await get_workouts_collection().create_index([("owner_id", 1), ("source_hash", 1)])
     await get_workouts_collection().create_index("owner_id")
     await get_wod_cache_collection().create_index("date")
+    await get_concept2_cache_collection().create_index("date")
     # The gym feed always reads one gym's recent days, so index the pair.
     await get_wodify_cache_collection().create_index([("gym", 1), ("date", -1)])
     # parse_cache is keyed by source hash as its _id, so lookups need no index.

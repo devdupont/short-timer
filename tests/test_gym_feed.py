@@ -52,9 +52,7 @@ def _no_real_llm(monkeypatch: pytest.MonkeyPatch) -> None:
     from short_timer.models import Workout, WorkoutMode
 
     async def fake_parse(text: str, name_hint: str | None = None) -> Workout:
-        return Workout(
-            name=name_hint or "Parsed", mode=WorkoutMode.FOR_TIME, source_text=text
-        )
+        return Workout(name=name_hint or "Parsed", mode=WorkoutMode.FOR_TIME, source_text=text)
 
     monkeypatch.setattr(wodify_cache, "parse_workout_text", fake_parse)
 

@@ -44,9 +44,7 @@ def register_error_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(anthropic.RateLimitError)
-    async def _upstream_throttled(
-        request: Request, exc: anthropic.RateLimitError
-    ) -> JSONResponse:
+    async def _upstream_throttled(request: Request, exc: anthropic.RateLimitError) -> JSONResponse:
         logger.warning("Anthropic rate limited us.")
         return _json(
             status.HTTP_429_TOO_MANY_REQUESTS,
