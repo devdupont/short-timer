@@ -25,13 +25,13 @@ from short_timer.models import (
     UserConfig,
     UserConfigUpdate,
     UserConfigView,
-    normalize_feeds,
     WodifyMemberConfig,
     WodifyMemberConfigUpdate,
     WodifyMemberConfigView,
     WodifyOwnerConfig,
     WodifyOwnerConfigUpdate,
     WodifyOwnerConfigView,
+    normalize_feeds,
 )
 
 logger = logging.getLogger(__name__)

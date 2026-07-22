@@ -97,12 +97,7 @@ async def last_refreshed_at(fingerprint: str) -> datetime | None:
 
 async def read_cached(fingerprint: str, days: int) -> list[GymWod]:
     """Most recent `days` cached workouts for one gym, newest first."""
-    cursor = (
-        get_wodify_cache_collection()
-        .find({"gym": fingerprint})
-        .sort("date", -1)
-        .limit(days)
-    )
+    cursor = get_wodify_cache_collection().find({"gym": fingerprint}).sort("date", -1).limit(days)
     return [_from_document(doc) async for doc in cursor]
 
 
@@ -120,9 +115,7 @@ async def _store(wods: list[GymWod], fingerprint: str) -> int:
 class GymSource:
     """A user's configured gym, resolved and ready to fetch."""
 
-    def __init__(
-        self, *, route: str, credential: str, location: str, program: str
-    ) -> None:
+    def __init__(self, *, route: str, credential: str, location: str, program: str) -> None:
         self.route = route
         self.credential = credential
         self.location = location
@@ -205,12 +198,7 @@ async def ensure_parsed(fingerprint: str, limit: int = CACHE_DAYS) -> int:
     one model call per workout instead of one per member.
     """
     parsed = 0
-    cursor = (
-        get_wodify_cache_collection()
-        .find({"gym": fingerprint})
-        .sort("date", -1)
-        .limit(limit)
-    )
+    cursor = get_wodify_cache_collection().find({"gym": fingerprint}).sort("date", -1).limit(limit)
     async for doc in cursor:
         text = str(doc.get("text") or "")
         if not text or await find_parse(text) is not None:

@@ -145,9 +145,7 @@ async def test_backfill_restores_dedup_for_legacy_rows(authed_client: AsyncClien
     )
     legacy_id = created.json()["id"]
     # Simulate a document written before the field was introduced.
-    await get_workouts_collection().update_one(
-        {"_id": legacy_id}, {"$unset": {"source_hash": ""}}
-    )
+    await get_workouts_collection().update_one({"_id": legacy_id}, {"$unset": {"source_hash": ""}})
 
     assert await backfill_source_hashes() == 1
 
@@ -209,9 +207,7 @@ async def test_loading_a_prewarmed_wod_costs_no_llm_call(
 
     text = "50-40-30-20-10 reps for time of:\nDouble-unders\nSit-ups"
     # What the daily background task leaves behind in the shared pool.
-    await remember_parse(
-        Workout(name="Sunday 260719", mode=WorkoutMode.FOR_TIME, source_text=text)
-    )
+    await remember_parse(Workout(name="Sunday 260719", mode=WorkoutMode.FOR_TIME, source_text=text))
 
     async def exploding_parse(text: str, name_hint: str | None = None) -> Workout:
         raise AssertionError("a pre-parsed WOD must not hit the model")
@@ -233,8 +229,8 @@ async def test_parse_is_shared_across_owners(
     authed_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """One user's parse spares every other user the same LLM call."""
-    from short_timer.auth import current_owner
     from short_timer.app import app as fastapi_app
+    from short_timer.auth import current_owner
 
     calls = 0
 
@@ -266,8 +262,8 @@ async def test_one_owners_edits_do_not_leak_to_another(
     authed_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The pool shares the neutral parse, never a user's customizations."""
-    from short_timer.auth import current_owner
     from short_timer.app import app as fastapi_app
+    from short_timer.auth import current_owner
 
     async def fake_parse(text: str, name_hint: str | None = None) -> Workout:
         return _fran().model_copy(update={"source_text": text})
