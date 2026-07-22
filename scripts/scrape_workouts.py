@@ -35,8 +35,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
-from bs4 import BeautifulSoup
 
+from short_timer.html_text import extract_text
 from short_timer.llm import WorkoutParseError, parse_workout_text
 
 USER_AGENT = "short-timer-fixture-scraper/0.1 (+https://github.com/devdupont/short-timer)"
@@ -59,15 +59,6 @@ def _robots_allow(url: str) -> bool:
     return parser.can_fetch(USER_AGENT, url)
 
 
-def _extract_text(html: str) -> str:
-    soup = BeautifulSoup(html, "html.parser")
-    for tag in soup(["script", "style", "noscript", "nav", "header", "footer"]):
-        tag.decompose()
-    text = soup.get_text("\n")
-    lines = [line.strip() for line in text.splitlines()]
-    return "\n".join(line for line in lines if line)
-
-
 async def scrape_one(client: httpx.AsyncClient, url: str) -> dict | None:
     if not _robots_allow(url):
         print(f"skip (robots.txt disallows): {url}", file=sys.stderr)
@@ -75,7 +66,7 @@ async def scrape_one(client: httpx.AsyncClient, url: str) -> dict | None:
 
     response = await client.get(url, headers={"User-Agent": USER_AGENT}, timeout=30)
     response.raise_for_status()
-    text = _extract_text(response.text)
+    text = extract_text(response.text)
 
     try:
         workout = await parse_workout_text(text)

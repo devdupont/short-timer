@@ -32,9 +32,17 @@ _DROPPED_FIELDS = ("id", "created_at", "updated_at", "owner_id", "source_hash")
 #: Provenance, which decides how long an entry is kept.
 SOURCE_CROSSFIT = "crossfit"
 SOURCE_USER = "user"
+#: A gym's own programming, pulled from Wodify. Deliberately *not* permanent
+#: like crossfit.com: it belongs to one gym rather than to a public commons,
+#: and only that gym's members ever hold the same text, so the sharing win is
+#: bounded by a single gym rather than the whole user base. Ageing it out costs
+#: at most one re-parse of a workout nobody has looked at in a year, and means
+#: a gym's programming doesn't linger indefinitely after someone leaves.
+SOURCE_WODIFY = "wodify"
 
 #: crossfit.com workouts are public and endlessly re-used, so they're kept
-#: indefinitely. Text someone pasted is their content, so it ages out.
+#: indefinitely. Everything else is somebody's content, so it ages out — the
+#: sweep below exempts only crossfit.com.
 USER_RETENTION = timedelta(days=365)
 
 

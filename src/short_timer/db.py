@@ -40,6 +40,11 @@ def get_parse_cache_collection() -> AsyncCollection[dict[str, Any]]:
     return get_database()["parse_cache"]
 
 
+def get_wodify_cache_collection() -> AsyncCollection[dict[str, Any]]:
+    """Cached Wodify workouts, keyed by gym fingerprint + date (see wodify_cache)."""
+    return get_database()["wodify_cache"]
+
+
 def get_users_collection() -> AsyncCollection[dict[str, Any]]:
     """Accounts, keyed by user id (`_id`), which is also their `owner_id`."""
     return get_database()["users"]
@@ -56,6 +61,8 @@ async def ensure_indexes() -> None:
     await get_workouts_collection().create_index([("owner_id", 1), ("source_hash", 1)])
     await get_workouts_collection().create_index("owner_id")
     await get_wod_cache_collection().create_index("date")
+    # The gym feed always reads one gym's recent days, so index the pair.
+    await get_wodify_cache_collection().create_index([("gym", 1), ("date", -1)])
     # parse_cache is keyed by source hash as its _id, so lookups need no index.
     # The retention sweep filters on provenance and age, though.
     await get_parse_cache_collection().create_index([("source", 1), ("created_at", 1)])
