@@ -40,6 +40,11 @@ def get_parse_cache_collection() -> AsyncCollection[dict[str, Any]]:
     return get_database()["parse_cache"]
 
 
+def get_users_collection() -> AsyncCollection[dict[str, Any]]:
+    """Accounts, keyed by user id (`_id`), which is also their `owner_id`."""
+    return get_database()["users"]
+
+
 def get_rate_limit_collection() -> AsyncCollection[dict[str, Any]]:
     """Rate-limit counters, one document per (scope, subject, window)."""
     return get_database()["rate_limits"]

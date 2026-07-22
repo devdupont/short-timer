@@ -885,6 +885,8 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "anthropic" },
+    { name = "beautifulsoup4" },
+    { name = "cryptography" },
     { name = "dnspython" },
     { name = "fastapi" },
     { name = "httpx" },
@@ -896,15 +898,11 @@ dependencies = [
     { name = "uvicorn", extra = ["standard"] },
 ]
 
-[package.optional-dependencies]
-scrape = [
-    { name = "beautifulsoup4" },
-]
-
 [package.metadata]
 requires-dist = [
     { name = "anthropic", specifier = ">=0.40" },
-    { name = "beautifulsoup4", marker = "extra == 'scrape'", specifier = ">=4.12" },
+    { name = "beautifulsoup4", specifier = ">=4.12" },
+    { name = "cryptography", specifier = ">=43" },
     { name = "dnspython", specifier = ">=2.6" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.28" },
@@ -915,7 +913,6 @@ requires-dist = [
     { name = "pymongo", specifier = ">=4.9" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34" },
 ]
-provides-extras = ["scrape"]
 
 [[package]]
 name = "sniffio"

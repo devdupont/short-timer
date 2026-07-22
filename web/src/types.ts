@@ -42,6 +42,55 @@ export interface WodEntry {
   saved_workout_id?: string | null;
 }
 
+/** A stored credential as the server describes it — never the value itself. */
+export interface SecretStatus {
+  is_set: boolean;
+  masked?: string | null;
+}
+
+export interface WodifyOwnerConfig {
+  api_key: SecretStatus;
+  location?: string | null;
+  program?: string | null;
+  enabled: boolean;
+}
+
+export interface WodifyMemberConfig {
+  whiteboard_key: SecretStatus;
+  location?: string | null;
+  program?: string | null;
+  enabled: boolean;
+}
+
+export interface UserConfig {
+  wodify_owner: WodifyOwnerConfig;
+  wodify_member: WodifyMemberConfig;
+}
+
+export interface Me {
+  id: string;
+  display_name: string;
+  config: UserConfig;
+  /** False when the server has no encryption keys, so credentials can't be saved. */
+  secrets_available: boolean;
+}
+
+/**
+ * A requested config change. Every field is optional and omitted means "leave
+ * it alone" — which is how a credential survives an edit to the fields around
+ * it without the browser ever holding the secret. An empty string clears it.
+ */
+export interface WodifyConfigUpdate {
+  location?: string | null;
+  program?: string | null;
+  enabled?: boolean;
+}
+
+export interface UserConfigUpdate {
+  wodify_owner?: WodifyConfigUpdate & { api_key?: string };
+  wodify_member?: WodifyConfigUpdate & { whiteboard_key?: string };
+}
+
 export const MODE_LABELS: Record<WorkoutMode, string> = {
   for_time: "For Time",
   amrap: "AMRAP",

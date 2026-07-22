@@ -21,12 +21,15 @@ dependencies = [
     "dnspython>=2.6",
     "anthropic>=0.40",
     "itsdangerous>=2.2",
+    # Encrypts per-user third-party credentials at rest (see crypto.py).
+    "cryptography>=43",
     "mcp>=1.2",
     "httpx>=0.28",
+    # Extracts visible text from fetched HTML. Was a `scrape` extra back when
+    # only the fixture script used it; the Wodify intakes parse HTML at
+    # runtime, so it has to be in the image the API actually ships.
+    "beautifulsoup4>=4.12",
 ]
-
-[project.optional-dependencies]
-scrape = ["beautifulsoup4>=4.12"]
 
 [project.scripts]
 short-timer-server = "short_timer.app:run"
@@ -43,7 +46,6 @@ dependencies = [
     "mongomock-motor>=0.0.34",
     "respx>=0.22",
     "httpx>=0.28",
-    "beautifulsoup4>=4.12",
     "mypy>=1.13",
 ]
 

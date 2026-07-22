@@ -17,7 +17,6 @@ from datetime import UTC, date, datetime, timedelta
 
 from short_timer.crossfit import Wod, fetch_recent_wods, is_rest_day
 from short_timer.db import get_wod_cache_collection
-from short_timer.dedup import source_hash
 from short_timer.llm import parse_workout_text
 from short_timer.parse_cache import (
     SOURCE_CROSSFIT,

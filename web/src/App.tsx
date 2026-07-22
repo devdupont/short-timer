@@ -1,6 +1,7 @@
 import { useState } from "react";
 import "./App.css";
 import { PasscodeGate } from "./components/PasscodeGate";
+import { Settings } from "./components/Settings";
 import { TimerView } from "./components/TimerView";
 import { WorkoutBuilder } from "./components/WorkoutBuilder";
 import { WorkoutImport } from "./components/WorkoutImport";
@@ -10,7 +11,7 @@ import type { EditTarget } from "./components/WorkoutBuilder";
 import { logout } from "./api";
 import type { Workout } from "./types";
 
-type Tab = "wod" | "import" | "build" | "library" | "timer";
+type Tab = "wod" | "import" | "build" | "library" | "timer" | "settings";
 
 function App() {
   const [unlocked, setUnlocked] = useState(false);
@@ -55,6 +56,7 @@ function App() {
     { id: "build", label: "Build" },
     { id: "library", label: "Library" },
     ...(activeWorkout ? [{ id: "timer" as Tab, label: "Timer" }] : []),
+    { id: "settings", label: "Settings" },
   ];
 
   return (
@@ -123,6 +125,7 @@ function App() {
           />
         )}
         {tab === "timer" && activeWorkout && <TimerView workout={activeWorkout} />}
+        {tab === "settings" && <Settings />}
       </main>
     </div>
   );

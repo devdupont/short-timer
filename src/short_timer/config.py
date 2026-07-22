@@ -18,6 +18,14 @@ class Settings(BaseSettings):
         default=True, description="Set false only for plain-http local dev/tests."
     )
 
+    # Keys encrypting per-user third-party credentials, newest first — the
+    # first is used for new writes, the rest only to read values written
+    # before the last rotation. Same NoDecode treatment as cors_origins.
+    # Deliberately not derived from session_secret: rotating the cookie secret
+    # must not render every stored credential unreadable. Empty is valid and
+    # simply disables credential storage (see crypto.is_configured).
+    secrets_keys: Annotated[list[str], NoDecode] = Field(default_factory=list)
+
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-5"
     #: Cap on a single parse. The SDK's default is 10 minutes, long enough for
@@ -35,16 +43,16 @@ class Settings(BaseSettings):
         default_factory=lambda: ["http://localhost:5173"]
     )
 
-    @field_validator("cors_origins", mode="before")
+    @field_validator("cors_origins", "secrets_keys", mode="before")
     @classmethod
-    def _split_origins(cls, value: object) -> object:
+    def _split_list(cls, value: object) -> object:
         """Accept a comma-separated list, a JSON array, or a real list."""
         if not isinstance(value, str):
             return value
         text = value.strip()
         if text.startswith("["):
             return json.loads(text)
-        return [origin.strip() for origin in text.split(",") if origin.strip()]
+        return [item.strip() for item in text.split(",") if item.strip()]
 
     # --- Trusting the caller's address --------------------------------------
     # Rate limits are counted per client address, so a spoofable address means

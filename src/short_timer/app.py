@@ -15,7 +15,8 @@ from short_timer.db import (
     get_database,
 )
 from short_timer.errors import register_error_handlers
-from short_timer.routers import auth, wods, workouts
+from short_timer.routers import auth, me, wods, workouts
+from short_timer.users import ensure_default_user
 from short_timer.parse_cache import (
     backfill_parse_sources,
     migrate_wod_parses,
@@ -69,6 +70,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # stop the app from serving.
     try:
         await ensure_indexes()
+        # Seeded with id == DEFAULT_OWNER_ID, so everything backfilled below
+        # already belongs to it.
+        await ensure_default_user()
         hashes = await backfill_source_hashes()
         owners = await backfill_owner_ids()
         moved = await migrate_wod_parses()
@@ -113,6 +117,7 @@ app.add_middleware(
 register_error_handlers(app)
 
 app.include_router(auth.router)
+app.include_router(me.router)
 app.include_router(workouts.router)
 app.include_router(wods.router)
 
