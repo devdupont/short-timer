@@ -25,6 +25,7 @@ from short_timer.models import (
     UserConfig,
     UserConfigUpdate,
     UserConfigView,
+    normalize_feeds,
     WodifyMemberConfig,
     WodifyMemberConfigUpdate,
     WodifyMemberConfigView,
@@ -96,6 +97,9 @@ def to_view(config: UserConfig) -> UserConfigView:
             program=config.wodify_member.program,
             enabled=config.wodify_member.enabled,
         ),
+        # Normalized on the way out so a record written before a feed kind
+        # existed still reports a complete list.
+        feeds=normalize_feeds(config.feeds),
     )
 
 
@@ -159,6 +163,8 @@ async def update_config(user: User, update: UserConfigUpdate) -> User:
         config.wodify_owner = _merged_owner(config.wodify_owner, update.wodify_owner)
     if update.wodify_member is not None:
         config.wodify_member = _merged_member(config.wodify_member, update.wodify_member)
+    if update.feeds is not None:
+        config.feeds = normalize_feeds(update.feeds)
 
     updated = user.model_copy(update={"config": config, "updated_at": datetime.now(UTC)})
     await get_users_collection().update_one(

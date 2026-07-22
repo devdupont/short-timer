@@ -1,21 +1,21 @@
 import { useState } from "react";
 import "./App.css";
+import { Home } from "./components/Home";
 import { PasscodeGate } from "./components/PasscodeGate";
 import { Settings } from "./components/Settings";
 import { TimerView } from "./components/TimerView";
 import { WorkoutBuilder } from "./components/WorkoutBuilder";
 import { WorkoutImport } from "./components/WorkoutImport";
 import { WorkoutLibrary } from "./components/WorkoutLibrary";
-import { WorkoutWod } from "./components/WorkoutWod";
 import type { EditTarget } from "./components/WorkoutBuilder";
 import { logout } from "./api";
 import type { Workout } from "./types";
 
-type Tab = "wod" | "import" | "build" | "library" | "timer" | "settings";
+type Tab = "home" | "import" | "build" | "library" | "timer" | "settings";
 
 function App() {
   const [unlocked, setUnlocked] = useState(false);
-  const [tab, setTab] = useState<Tab>("wod");
+  const [tab, setTab] = useState<Tab>("home");
   const [activeWorkout, setActiveWorkout] = useState<Workout | null>(null);
   const [libraryRefreshKey, setLibraryRefreshKey] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -51,7 +51,7 @@ function App() {
   }
 
   const tabs: { id: Tab; label: string }[] = [
-    { id: "wod", label: "WOD" },
+    { id: "home", label: "Home" },
     { id: "import", label: "Paste" },
     { id: "build", label: "Build" },
     { id: "library", label: "Library" },
@@ -103,7 +103,13 @@ function App() {
       </header>
 
       <main>
-        {tab === "wod" && <WorkoutWod onLoad={handleSaved} onEdit={handleEdit} />}
+        {tab === "home" && (
+          <Home
+            onLoad={handleSaved}
+            onEdit={handleEdit}
+            onOpenSettings={() => setTab("settings")}
+          />
+        )}
         {tab === "import" && <WorkoutImport onSaved={handleSaved} onLoad={handleLoadOnly} />}
         {tab === "build" && (
           // Remount when the edit target changes so the form re-seeds from it.

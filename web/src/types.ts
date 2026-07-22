@@ -81,9 +81,23 @@ export interface WodifyMemberConfig {
   enabled: boolean;
 }
 
+/** A workout source the home page knows how to render. */
+export type FeedKind = "gym" | "crossfit";
+
+/**
+ * Whether a feed appears on the home page. Distinct from the `enabled` on a
+ * Wodify config, which picks which credential route fetches the gym — this one
+ * is purely about display, and list position is the order.
+ */
+export interface FeedPref {
+  kind: FeedKind;
+  enabled: boolean;
+}
+
 export interface UserConfig {
   wodify_owner: WodifyOwnerConfig;
   wodify_member: WodifyMemberConfig;
+  feeds: FeedPref[];
 }
 
 export interface Me {
@@ -108,6 +122,8 @@ export interface WodifyConfigUpdate {
 export interface UserConfigUpdate {
   wodify_owner?: WodifyConfigUpdate & { api_key?: string };
   wodify_member?: WodifyConfigUpdate & { whiteboard_key?: string };
+  /** Replaced wholesale, not merged — position is the display order. */
+  feeds?: FeedPref[];
 }
 
 export const MODE_LABELS: Record<WorkoutMode, string> = {
