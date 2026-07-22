@@ -161,11 +161,63 @@ class WodifyMemberConfig(BaseModel):
         return bool(self.enabled and self.whiteboard_key)
 
 
+class FeedKind(StrEnum):
+    """A source of workouts the home page can show.
+
+    Adding a source means adding a member here and teaching the home page to
+    render it — not adding a tab. The set is closed on purpose: these are the
+    integrations the server knows how to fetch, not free-form user input.
+    """
+
+    GYM = "gym"
+    CROSSFIT = "crossfit"
+
+
+#: Order a user sees before they reorder anything. Their own gym outranks a
+#: public feed: if someone went to the trouble of connecting a box, that's the
+#: programming they came for.
+DEFAULT_FEED_ORDER: tuple[FeedKind, ...] = (FeedKind.GYM, FeedKind.CROSSFIT)
+
+
+class FeedPref(BaseModel):
+    """Whether a feed appears on the home page.
+
+    Distinct from the `enabled` flag on a Wodify config, which selects *which
+    credential route* to fetch a gym with. This one is purely presentational:
+    it decides what the home page renders, and position in the list is the
+    display order.
+    """
+
+    kind: FeedKind
+    enabled: bool = True
+
+
+def default_feeds() -> list[FeedPref]:
+    return [FeedPref(kind=kind) for kind in DEFAULT_FEED_ORDER]
+
+
+def normalize_feeds(feeds: list[FeedPref]) -> list[FeedPref]:
+    """Drop duplicates and append any feed the stored list doesn't mention.
+
+    Config written before a `FeedKind` existed simply won't list it, and a
+    hand-edited document could repeat one. Rather than migrating records, every
+    read passes through here — a new source shows up for existing users at its
+    default position, enabled.
+    """
+    seen: dict[FeedKind, FeedPref] = {}
+    for feed in feeds:
+        seen.setdefault(feed.kind, feed)
+    ordered = list(seen.values())
+    ordered.extend(FeedPref(kind=kind) for kind in DEFAULT_FEED_ORDER if kind not in seen)
+    return ordered
+
+
 class UserConfig(BaseModel):
     """Everything a user configures about their own account."""
 
     wodify_owner: WodifyOwnerConfig = Field(default_factory=WodifyOwnerConfig)
     wodify_member: WodifyMemberConfig = Field(default_factory=WodifyMemberConfig)
+    feeds: list[FeedPref] = Field(default_factory=default_feeds)
 
 
 class User(BaseModel):
@@ -199,10 +251,15 @@ class WodifyMemberConfigView(BaseModel):
 
 
 class UserConfigView(BaseModel):
-    """Config as the client sees it — credentials reduced to set/not-set."""
+    """Config as the client sees it — credentials reduced to set/not-set.
+
+    `feeds` carries no secret, so it crosses the boundary as-is rather than
+    getting a parallel view model that would only ever copy fields across.
+    """
 
     wodify_owner: WodifyOwnerConfigView = Field(default_factory=WodifyOwnerConfigView)
     wodify_member: WodifyMemberConfigView = Field(default_factory=WodifyMemberConfigView)
+    feeds: list[FeedPref] = Field(default_factory=default_feeds)
 
 
 class MeResponse(BaseModel):
@@ -238,3 +295,8 @@ class WodifyMemberConfigUpdate(BaseModel):
 class UserConfigUpdate(BaseModel):
     wodify_owner: WodifyOwnerConfigUpdate | None = None
     wodify_member: WodifyMemberConfigUpdate | None = None
+    #: Replaced wholesale rather than merged, because position *is* the display
+    #: order — there's no unambiguous way to merge one entry into an ordered
+    #: list. Absent still means "leave it alone". Bounded by the number of
+    #: kinds that exist, since anything longer is duplicates or junk.
+    feeds: list[FeedPref] | None = Field(default=None, max_length=len(FeedKind))

@@ -1,6 +1,19 @@
 import { useEffect, useState } from "react";
 import { ApiError, getMe, updateConfig } from "../api";
-import type { Me, UserConfigUpdate } from "../types";
+import { FEED_SPECS } from "../feeds";
+import type { FeedPref, Me, UserConfigUpdate } from "../types";
+
+/** Feed order is sent as a whole list, so both edits below return a new one. */
+function setEnabled(feeds: FeedPref[], index: number, enabled: boolean): FeedPref[] {
+  return feeds.map((feed, i) => (i === index ? { ...feed, enabled } : feed));
+}
+
+function move(feeds: FeedPref[], index: number, delta: number): FeedPref[] {
+  const next = [...feeds];
+  const [moved] = next.splice(index, 1);
+  next.splice(index + delta, 0, moved);
+  return next;
+}
 
 /**
  * Credentials are write-only: the server reports whether one is stored and
@@ -147,6 +160,57 @@ export function Settings() {
 
       <section className="form-card">
         <div className="builder-section-head">
+          <h3>Home page feeds</h3>
+          <p className="section-sub">
+            Which workout sources appear on your home page, and in what order. Hiding a feed
+            doesn’t disconnect it — your gym credentials stay saved either way.
+          </p>
+        </div>
+
+        <ul className="feed-pref-list">
+          {me.config.feeds.map((feed, index) => (
+            <li key={feed.kind} className="feed-pref-row">
+              <label className="feed-pref-toggle">
+                <input
+                  type="checkbox"
+                  checked={feed.enabled}
+                  disabled={saving}
+                  onChange={(event) =>
+                    save(
+                      { feeds: setEnabled(me.config.feeds, index, event.target.checked) },
+                      event.target.checked
+                        ? `${FEED_SPECS[feed.kind].heading} shown on your home page.`
+                        : `${FEED_SPECS[feed.kind].heading} hidden.`,
+                    )
+                  }
+                />
+                <span>{FEED_SPECS[feed.kind].heading}</span>
+              </label>
+              <div className="feed-pref-order">
+                <button
+                  className="secondary-button"
+                  aria-label={`Move ${FEED_SPECS[feed.kind].heading} up`}
+                  disabled={saving || index === 0}
+                  onClick={() => save({ feeds: move(me.config.feeds, index, -1) }, "Order saved.")}
+                >
+                  ↑
+                </button>
+                <button
+                  className="secondary-button"
+                  aria-label={`Move ${FEED_SPECS[feed.kind].heading} down`}
+                  disabled={saving || index === me.config.feeds.length - 1}
+                  onClick={() => save({ feeds: move(me.config.feeds, index, 1) }, "Order saved.")}
+                >
+                  ↓
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section className="form-card">
+        <div className="builder-section-head">
           <h3>My gym’s whiteboard</h3>
           <p className="section-sub">
             For gym members. Works only if your gym has turned on Wodify’s public whiteboard —
@@ -193,7 +257,9 @@ export function Settings() {
             checked={draft.memberEnabled}
             onChange={(e) => patch({ memberEnabled: e.target.checked })}
           />
-          <span className="field-label">Show this gym’s workouts</span>
+          {/* Selects which credential fetches the gym, not whether the feed is
+              on the home page — that's the "Home page feeds" list above. */}
+          <span className="field-label">Use this connection</span>
         </label>
 
         <button
@@ -263,7 +329,9 @@ export function Settings() {
             checked={draft.ownerEnabled}
             onChange={(e) => patch({ ownerEnabled: e.target.checked })}
           />
-          <span className="field-label">Show this gym’s workouts</span>
+          {/* Selects which credential fetches the gym, not whether the feed is
+              on the home page — that's the "Home page feeds" list above. */}
+          <span className="field-label">Use this connection</span>
         </label>
 
         <button

@@ -578,6 +578,110 @@ button {
   gap: 12px;
 }
 
+/* --- Home page feeds ----------------------------------------------------- */
+
+.feed-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.feed-section + .feed-section {
+  margin-top: 34px;
+  padding-top: 28px;
+  border-top: 1px solid var(--border);
+}
+
+.feed-section .panel-intro {
+  margin: 0;
+}
+
+/* Prior days collapse by default so a second feed isn't pushed off-screen. */
+.feed-earlier > summary {
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  padding: 6px 0;
+  list-style: none;
+}
+
+.feed-earlier > summary::-webkit-details-marker {
+  display: none;
+}
+
+.feed-earlier > summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 8px;
+  transition: transform 0.15s ease;
+}
+
+.feed-earlier[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.feed-earlier > summary:hover {
+  color: var(--accent);
+}
+
+.feed-earlier .wod-list {
+  margin-top: 12px;
+}
+
+.home-welcome {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+
+/* --- Feed preferences (Settings) ----------------------------------------- */
+
+.feed-pref-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.feed-pref-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.feed-pref-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.feed-pref-toggle input {
+  width: auto;
+  margin: 0;
+  cursor: pointer;
+}
+
+.feed-pref-order {
+  display: flex;
+  gap: 6px;
+}
+
+.feed-pref-order button {
+  padding: 4px 10px;
+  line-height: 1.2;
+}
+
 .error {
   color: #e5484d;
 }
