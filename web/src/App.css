@@ -274,6 +274,22 @@ button {
   font-weight: 400;
 }
 
+/* A checkbox and its label sit on one line, and the box opts out of the
+   full-width sizing that `.form-card input` gives text inputs. */
+.checkbox-field {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.checkbox-field input[type="checkbox"] {
+  width: auto;
+  flex: none;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent-border);
+}
+
 /* mm:ss entry — two compact boxes either side of a colon. */
 .duration-input {
   display: flex;

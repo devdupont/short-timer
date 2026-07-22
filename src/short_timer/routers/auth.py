@@ -1,9 +1,15 @@
 from fastapi import APIRouter, HTTPException, Request, Response, status
 
-from short_timer.auth import SESSION_COOKIE_NAME, check_passcode, create_session_token
+from short_timer.auth import (
+    DEFAULT_OWNER_ID,
+    SESSION_COOKIE_NAME,
+    check_passcode,
+    create_session_token,
+)
 from short_timer.config import get_settings
 from short_timer.models import LoginRequest
 from short_timer.ratelimit import client_ip, enforce, login_limit, peek
+from short_timer.users import ensure_default_user
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -21,10 +27,16 @@ async def login(body: LoginRequest, request: Request, response: Response) -> Non
         await enforce(login_limit(), subject)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect passcode")
 
+    # The passcode is how you authenticate *as the default user*; the session
+    # carries that id so tenancy has a real account behind it. A second login
+    # method later mints a token for a different user, and nothing downstream
+    # needs to change.
+    await ensure_default_user()
+
     settings = get_settings()
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
-        value=create_session_token(),
+        value=create_session_token(DEFAULT_OWNER_ID),
         max_age=settings.session_max_age_seconds,
         httponly=True,
         samesite="lax",

@@ -885,6 +885,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "anthropic" },
+    { name = "cryptography" },
     { name = "dnspython" },
     { name = "fastapi" },
     { name = "httpx" },
@@ -905,6 +906,7 @@ scrape = [
 requires-dist = [
     { name = "anthropic", specifier = ">=0.40" },
     { name = "beautifulsoup4", marker = "extra == 'scrape'", specifier = ">=4.12" },
+    { name = "cryptography", specifier = ">=43" },
     { name = "dnspython", specifier = ">=2.6" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.28" },

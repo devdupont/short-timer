@@ -21,6 +21,8 @@ dependencies = [
     "dnspython>=2.6",
     "anthropic>=0.40",
     "itsdangerous>=2.2",
+    # Encrypts per-user third-party credentials at rest (see crypto.py).
+    "cryptography>=43",
     "mcp>=1.2",
     "httpx>=0.28",
 ]

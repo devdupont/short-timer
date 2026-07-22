@@ -1,13 +1,17 @@
-"""Shared-passcode auth.
+"""Session auth.
 
-There's no user model yet, just a single passcode (`APP_PASSCODE`). A
-successful login gets a signed, expiring session cookie; every other route
-requires that cookie to be present and valid. This is intentionally simple —
-swap it for real accounts later without touching the rest of the app, since
-routes only depend on `require_session`, not on any notion of a user.
+Authentication is still a single shared passcode (`APP_PASSCODE`), but a
+successful login now resolves to a *user id* carried inside the signed session
+cookie rather than a bare "authenticated" flag. `current_owner` reads that id,
+which keeps it the single place tenancy is decided while making room for a
+real login: adding signup means adding another way to mint a token, not
+touching any of the queries that filter on the result.
+
+Tokens issued before the id was carried are still honoured and resolve to the
+default user, so shipping this doesn't sign existing sessions out.
 """
 
-from fastapi import Cookie, Depends, HTTPException, status
+from fastapi import Cookie, HTTPException, status
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from short_timer.config import get_settings
@@ -28,17 +32,30 @@ def check_passcode(passcode: str) -> bool:
     return passcode == get_settings().app_passcode
 
 
-def create_session_token() -> str:
-    return _serializer().dumps({"authenticated": True})
+def create_session_token(user_id: str = DEFAULT_OWNER_ID) -> str:
+    return _serializer().dumps({"authenticated": True, "user_id": user_id})
 
 
-def verify_session_token(token: str) -> bool:
+def session_user_id(token: str) -> str | None:
+    """The user a token authenticates, or None if it isn't valid.
+
+    A token predating per-user sessions carries no `user_id`; it's still a
+    signature we issued, so it resolves to the default user rather than being
+    rejected and logging someone out mid-workout.
+    """
     max_age = get_settings().session_max_age_seconds
     try:
         data = _serializer().loads(token, max_age=max_age)
     except _INVALID_TOKEN_ERRORS:
-        return False
-    return bool(data.get("authenticated"))
+        return None
+    if not isinstance(data, dict) or not data.get("authenticated"):
+        return None
+    user_id = data.get("user_id")
+    return user_id if isinstance(user_id, str) and user_id else DEFAULT_OWNER_ID
+
+
+def verify_session_token(token: str) -> bool:
+    return session_user_id(token) is not None
 
 
 async def require_session(
@@ -48,12 +65,15 @@ async def require_session(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
 
 
-async def current_owner(_: None = Depends(require_session)) -> str:
+async def current_owner(
+    session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> str:
     """The owner that stored data is scoped to.
 
-    The shared passcode means one owner for now, but every query already
-    filters on this value — so introducing real accounts becomes a matter of
-    reading the user id out of the session here, rather than auditing each
-    database call for missing tenancy checks.
+    Every owner-scoped query filters on this value, so it stays the one place
+    tenancy is decided — routers read the result and never the session itself.
     """
-    return DEFAULT_OWNER_ID
+    user_id = session_user_id(session) if session is not None else None
+    if user_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    return user_id

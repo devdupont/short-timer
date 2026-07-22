@@ -1,4 +1,4 @@
-import type { WodEntry, Workout } from "./types";
+import type { Me, UserConfigUpdate, WodEntry, Workout } from "./types";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
@@ -37,6 +37,16 @@ export function login(passcode: string): Promise<void> {
 
 export function logout(): Promise<void> {
   return request("/api/auth/logout", { method: "POST" });
+}
+
+/** The signed-in user and their config. Credentials come back masked, never in full. */
+export function getMe(): Promise<Me> {
+  return request("/api/me");
+}
+
+/** Partial update: omitted fields keep their stored value. Returns the new state. */
+export function updateConfig(update: UserConfigUpdate): Promise<Me> {
+  return request("/api/me/config", { method: "PUT", body: JSON.stringify(update) });
 }
 
 export function parseWorkout(text: string, nameHint?: string): Promise<Workout> {
