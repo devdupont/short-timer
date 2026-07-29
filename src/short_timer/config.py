@@ -36,6 +36,14 @@ class Settings(BaseSettings):
     mongodb_uri: str = "mongodb://localhost:27017"
     mongodb_db_name: str = "short_timer"
 
+    #: Whose library the MCP server reads and writes. It has no session to get
+    #: this from — it's a local stdio tool, not an HTTP caller — so the owner is
+    #: named by the deployment instead. None means the default user, which is
+    #: everyone while the app authenticates with one shared passcode. Not
+    #: imported from `auth` as the constant it defaults to, because `auth`
+    #: imports this module.
+    mcp_owner_id: str | None = None
+
     # NoDecode stops pydantic-settings JSON-decoding this before our validator
     # runs. Without it, the obvious CORS_ORIGINS=https://shortimer.com raises a
     # SettingsError and the container fails to start.

@@ -60,9 +60,9 @@ Two things need to exist first:
   it's invisible. Sharing means a third state, and every query that filters
   `{"owner_id": owner_id}` becomes a decision point.
 
-One wart to fix before anything is shareable: the MCP server's
-`search_workouts` and `get_workout` (`src/short_timer/mcp_server.py`) don't
-filter on `owner_id` at all. That's survivable while it's a local single-user
-tool against a single-user deployment, and it is exactly the kind of
-unscoped read that turns into a data leak the day two people's workouts share
-a database.
+The MCP server used to read the whole `workouts` collection without filtering
+on `owner_id`; it now acts on one library, named by `MCP_OWNER_ID` and
+defaulting to the shared-passcode user. Worth remembering that it resolves its
+owner from configuration rather than from a session, so a deployment with real
+accounts has to point it at one of them — it has no way to answer "who's
+asking?" on its own.

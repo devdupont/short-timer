@@ -108,6 +108,11 @@ directly), and `search_workouts` / `get_workout` (library — read from the
 same MongoDB collection the web app uses). See
 `src/short_timer/mcp_server.py`.
 
+It reads and writes one owner's library. Having no session to derive that
+from, it takes the owner from `MCP_OWNER_ID`, which defaults to the user the
+shared passcode logs everyone in as — so it needs setting only once there are
+real accounts.
+
 ## Frontend setup
 
 ```bash
