@@ -23,7 +23,12 @@ dependencies = [
     "itsdangerous>=2.2",
     # Encrypts per-user third-party credentials at rest (see crypto.py).
     "cryptography>=43",
-    "mcp>=1.2",
+    # Capped at 1.x: mcp 2.0 removed `mcp.server.fastmcp`, which mcp_server.py
+    # imports FastMCP from, so an unpinned resolve doesn't just fail to
+    # type-check — it fails to import. uv.lock already resolves 1.28.1; this
+    # says so in the place a fresh environment reads (CI builds its hatch env
+    # from here, not from the lock). Lift it with the 2.x migration.
+    "mcp>=1.2,<2",
     "httpx>=0.28",
     # Extracts visible text from fetched HTML. Was a `scrape` extra back when
     # only the fixture script used it; the Wodify intakes parse HTML at
