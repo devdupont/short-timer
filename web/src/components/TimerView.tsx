@@ -1,17 +1,12 @@
 import { useEffect, useState } from "react";
 import { useTimerEngine } from "../hooks/useTimerEngine";
 import { useTimerAudio } from "../hooks/useTimerAudio";
+import { WorkoutTimeline } from "./WorkoutTimeline";
 import type { Workout } from "../types";
 import { isUntimed, MODE_LABELS } from "../types";
+import { formatClock, movementLabel } from "../timerPlan";
 
 const MUTED_KEY = "short-timer:muted";
-
-function formatClock(totalSeconds: number): string {
-  const seconds = Math.max(0, Math.floor(totalSeconds));
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
 
 /**
  * Untimed sessions: work through the list and tick things off.
@@ -24,10 +19,6 @@ function formatClock(totalSeconds: number): string {
 function UntimedSession({ workout }: { workout: Workout }) {
   const items = workout.segments
     .map((segment) => {
-      const movementText = segment.movements
-        .map((m) => [m.reps, m.name, m.distance, m.load].filter(Boolean).join(" "))
-        .filter(Boolean)
-        .join(", ");
       // A note usually restates the set count in the source's own words
       // ("2-3 sets"), which is truer than the single number the parser had to
       // round it to — so prefer it, and fall back to `rounds` when absent.
@@ -35,7 +26,7 @@ function UntimedSession({ workout }: { workout: Workout }) {
       const note = segment.movements.find((m) => m.notes)?.notes ?? null;
       const sets = segment.rounds ? `${segment.rounds} sets` : null;
       return {
-        title: movementText || segment.label || "",
+        title: movementLabel(segment) ?? "",
         detail: note ?? sets ?? "",
       };
     })
@@ -170,16 +161,6 @@ function ClockView({ workout }: { workout: Workout }) {
     ? Math.min(100, (state.elapsedSeconds / state.capSeconds) * 100)
     : 0;
 
-  const segmentLines = workout.segments
-    .map((segment) => ({
-      segment,
-      movementText: segment.movements
-        .map((m) => [m.reps, m.name, m.distance, m.load].filter(Boolean).join(" "))
-        .filter(Boolean)
-        .join(", "),
-    }))
-    .filter(({ segment, movementText }) => segment.label || segment.rounds || movementText);
-
   return (
     <div className={`timer-view ${tv ? "tv" : ""}`}>
       <div className="timer-toolbar">
@@ -281,17 +262,12 @@ function ClockView({ workout }: { workout: Workout }) {
         <button onClick={controls.reset}>Reset</button>
       </div>
 
-      {segmentLines.length > 0 && (
-        <ol className="segment-list">
-          {segmentLines.map(({ segment, movementText }, i) => (
-            <li key={i}>
-              {segment.label && <strong>{segment.label}: </strong>}
-              {segment.rounds && <em>{segment.rounds} rounds — </em>}
-              {movementText}
-            </li>
-          ))}
-        </ol>
-      )}
+      {/* The plan, colour-coded, with the live position marked — so the next
+          leg (and whether it's rest) is readable without waiting for it. */}
+      <WorkoutTimeline
+        workout={workout}
+        elapsedSeconds={state.status === "idle" || counting ? null : state.elapsedSeconds}
+      />
     </div>
   );
 }

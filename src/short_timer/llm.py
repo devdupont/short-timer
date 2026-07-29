@@ -56,6 +56,17 @@ workout-level `work_seconds`/`rest_seconds` when every leg really is the same \
 length (e.g. "6 x 3 minutes with 2 minutes light" is `rounds` 6, \
 `work_seconds` 180, `rest_seconds` 120, and needs no per-segment durations).
 
+When one leg of the rotation is itself rest — an EMOM whose "Minute 5: Rest", \
+a round that ends with a full minute off — set that segment's `is_rest` to true \
+and leave its `movements` empty. Don't emit a movement named "Rest": the clock \
+runs an `is_rest` segment as a rest period and says so, where a movement is \
+something it tells the athlete to go do. A rest leg is a leg like any other, so \
+it still counts toward the rotation and keeps the same duration as its \
+neighbours — only give it `work_seconds` if that particular leg runs a \
+different length. Use the workout-level `rest_seconds` instead when recovery \
+follows *every* leg ("30 seconds on, 15 seconds off"); `is_rest` is for a leg \
+of the rotation that is nothing but rest.
+
 Always call `emit_workout` exactly once with your best-effort structured \
 reading of the workout. Do not invent movements or numbers that aren't \
 implied by the text. Some interval workouts (e.g. "30 seconds on, 15 \
@@ -109,6 +120,12 @@ _WORKOUT_TOOL: ToolParam = {
                             "type": "integer",
                             "description": "Recovery following this leg, when the legs of the "
                             "workout differ in length. Falls back to the workout-level value.",
+                        },
+                        "is_rest": {
+                            "type": "boolean",
+                            "description": "True when this leg is rest rather than work — an "
+                            'EMOM minute that just says "Rest". Leave `movements` empty; the '
+                            "leg keeps its normal duration.",
                         },
                         "movements": {
                             "type": "array",

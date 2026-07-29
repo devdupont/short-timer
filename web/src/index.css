@@ -21,6 +21,20 @@
   --rest-color: #60a5fa;
   --leg-color: #fbbf24;
 
+  /* Workout visualizer palette. Movements are an identity encoding, so these
+     are assigned in a fixed order and never cycled — a seventh movement folds
+     into --viz-other rather than reusing a hue and claiming to be the first.
+     Stepped for this dark surface and validated as a set (OKLCH L 0.48–0.67,
+     all >= 3:1 on --bg, worst adjacent CVD dE 8.4). Blue is deliberately
+     absent: it belongs to rest, which is a state, not a movement. */
+  --viz-1: #d95926;
+  --viz-2: #199e70;
+  --viz-3: #c98500;
+  --viz-4: #d55181;
+  --viz-5: #008300;
+  --viz-6: #9085e9;
+  --viz-other: #6b7280;
+
   --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
   --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
   --mono: ui-monospace, Consolas, monospace;

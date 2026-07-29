@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ApiError, createWorkout, updateWorkout } from "../api";
+import { WorkoutTimeline } from "./WorkoutTimeline";
 import type { Movement, Workout, WorkoutMode, WorkoutSegment } from "../types";
 import { MODE_HINTS, MODE_LABELS } from "../types";
 
@@ -135,6 +136,17 @@ export function WorkoutBuilder({
           : s,
       ),
     }));
+  }
+
+  /**
+   * A rest leg has nothing to perform, so its movement editors go away — and
+   * come back with a blank one if it turns back into work.
+   */
+  function toggleRest(index: number, is_rest: boolean) {
+    updateSegment(index, {
+      is_rest,
+      movements: is_rest ? [] : [emptyMovement()],
+    });
   }
 
   function addSegment() {
@@ -302,6 +314,14 @@ export function WorkoutBuilder({
         <section className="segment-card" key={segIndex}>
           <div className="segment-card-head">
             <span className="segment-badge">Segment {segIndex + 1}</span>
+            <label className="rest-toggle">
+              <input
+                type="checkbox"
+                checked={Boolean(segment.is_rest)}
+                onChange={(e) => toggleRest(segIndex, e.target.checked)}
+              />
+              Rest period
+            </label>
             {workout.segments.length > 1 && (
               <button
                 type="button"
@@ -359,75 +379,91 @@ export function WorkoutBuilder({
             </div>
           )}
 
-          <div className="movement-list">
-            {segment.movements.map((movement, movIndex) => (
-              <div className="movement-item" key={movIndex}>
-                <div className="movement-item-head">
-                  <span className="movement-item-title">Movement {movIndex + 1}</span>
-                  {segment.movements.length > 1 && (
-                    <button
-                      type="button"
-                      className="icon-remove"
-                      aria-label={`Remove movement ${movIndex + 1}`}
-                      onClick={() => removeMovement(segIndex, movIndex)}
-                    >
-                      ×
-                    </button>
-                  )}
-                </div>
-                <label className="field">
-                  <span className="field-label">Name</span>
-                  <input
-                    placeholder="e.g. Pull-up"
-                    value={movement.name ?? ""}
-                    onChange={(e) => updateMovement(segIndex, movIndex, { name: e.target.value })}
-                  />
-                </label>
-                <div className="field-grid three">
-                  <label className="field">
-                    <span className="field-label">Reps</span>
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      placeholder="—"
-                      value={movement.reps ?? ""}
-                      onChange={(e) =>
-                        updateMovement(segIndex, movIndex, { reps: parseIntOrNull(e.target.value) })
-                      }
-                    />
-                  </label>
-                  <label className="field">
-                    <span className="field-label">Load</span>
-                    <input
-                      placeholder="e.g. 95/65 lb"
-                      value={movement.load ?? ""}
-                      onChange={(e) => updateMovement(segIndex, movIndex, { load: e.target.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span className="field-label">Distance</span>
-                    <input
-                      placeholder="e.g. 400 m"
-                      value={movement.distance ?? ""}
-                      onChange={(e) =>
-                        updateMovement(segIndex, movIndex, { distance: e.target.value })
-                      }
-                    />
-                  </label>
-                </div>
+          {segment.is_rest ? (
+            <p className="field-hint">
+              The clock runs this leg as rest — no movement, and it says “rest” while it does.
+            </p>
+          ) : (
+            <>
+              <div className="movement-list">
+                {segment.movements.map((movement, movIndex) => (
+                  <div className="movement-item" key={movIndex}>
+                    <div className="movement-item-head">
+                      <span className="movement-item-title">Movement {movIndex + 1}</span>
+                      {segment.movements.length > 1 && (
+                        <button
+                          type="button"
+                          className="icon-remove"
+                          aria-label={`Remove movement ${movIndex + 1}`}
+                          onClick={() => removeMovement(segIndex, movIndex)}
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                    <label className="field">
+                      <span className="field-label">Name</span>
+                      <input
+                        placeholder="e.g. Pull-up"
+                        value={movement.name ?? ""}
+                        onChange={(e) => updateMovement(segIndex, movIndex, { name: e.target.value })}
+                      />
+                    </label>
+                    <div className="field-grid three">
+                      <label className="field">
+                        <span className="field-label">Reps</span>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          placeholder="—"
+                          value={movement.reps ?? ""}
+                          onChange={(e) =>
+                            updateMovement(segIndex, movIndex, { reps: parseIntOrNull(e.target.value) })
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="field-label">Load</span>
+                        <input
+                          placeholder="e.g. 95/65 lb"
+                          value={movement.load ?? ""}
+                          onChange={(e) => updateMovement(segIndex, movIndex, { load: e.target.value })}
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="field-label">Distance</span>
+                        <input
+                          placeholder="e.g. 400 m"
+                          value={movement.distance ?? ""}
+                          onChange={(e) =>
+                            updateMovement(segIndex, movIndex, { distance: e.target.value })
+                          }
+                        />
+                      </label>
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
 
-          <button type="button" className="add-button" onClick={() => addMovement(segIndex)}>
-            + Add movement
-          </button>
+              <button type="button" className="add-button" onClick={() => addMovement(segIndex)}>
+                + Add movement
+              </button>
+            </>
+          )}
         </section>
       ))}
 
       <button type="button" className="add-button add-segment" onClick={addSegment}>
         + Add segment
       </button>
+
+      <div className="builder-section-head">
+        <h3 className="section-title">How it will run</h3>
+        <p className="section-sub">
+          The clock's reading of what you've built, updated as you type.
+        </p>
+      </div>
+      <WorkoutTimeline workout={workout} />
 
       <div className="builder-actions">
         <button className="primary-button" onClick={handleSave} disabled={saving || nameMissing}>

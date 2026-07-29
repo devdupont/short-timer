@@ -344,6 +344,13 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+}
+
+/* The rest toggle sits between the badge and Remove; on a narrow card it
+   wraps rather than squeezing the two of them. */
+.segment-card-head .rest-toggle {
+  margin-right: auto;
 }
 
 .segment-badge {
@@ -1036,12 +1043,161 @@ button {
   color: var(--text-h);
 }
 
-.segment-list {
+/* ---- Workout visualizer ----
+   The plan the clock will run, drawn to scale. Colour identifies a movement
+   and never carries meaning on its own: every block is labelled in the list
+   under the bar, rest is striped as well as blue, and the live position gets
+   a ring rather than just a brighter fill. */
+
+.workout-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   text-align: left;
   width: 100%;
   max-width: 640px;
-  color: var(--text);
   font-size: 15px;
+}
+
+.timeline-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.timeline-chip {
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--social-bg);
+  color: var(--text);
+}
+
+/* 2px of surface between fills, so neighbouring blocks stay countable even
+   when two of them wear a similar hue. */
+.timeline-track {
+  display: flex;
+  gap: 2px;
+  width: 100%;
+  height: 16px;
+}
+
+.timeline-block {
+  flex-basis: 0;
+  min-width: 3px;
+  border-radius: 3px;
+}
+
+/* Rest is double-encoded — blue *and* striped — so it survives a colourblind
+   reader, a projector, and a grayscale print. */
+.timeline-block.rest {
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(0, 0, 0, 0.35) 0 3px,
+    transparent 3px 7px
+  );
+}
+
+.timeline-block.active {
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--text-h);
+}
+
+.timeline-legs {
+  counter-reset: leg;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.timeline-leg {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 3px 6px;
+  border-radius: 6px;
+}
+
+.timeline-leg::before {
+  counter-increment: leg;
+  content: counter(leg);
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text);
+  min-width: 1.2em;
+}
+
+.timeline-leg.active {
+  background: var(--social-bg);
+}
+
+.timeline-swatch {
+  align-self: center;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.timeline-leg-time {
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--text);
+  min-width: 3.4em;
+}
+
+.timeline-leg-label {
+  color: var(--text-h);
+}
+
+.timeline-leg-label.rest {
+  color: var(--text);
+  font-style: italic;
+}
+
+.timeline-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.timeline-bar-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.timeline-bar-label {
+  color: var(--text-h);
+}
+
+.timeline-bar-meta {
+  font-family: var(--mono);
+  color: var(--text);
+}
+
+/* Marks a whole segment as the recovery, rather than work someone has to do.
+   Scoped under .panel to outrank the column layout every label gets there. */
+.panel .rest-toggle {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.rest-toggle input[type="checkbox"] {
+  width: auto;
+  flex: none;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--rest-color);
 }
 
 /* ---- Untimed sessions ----
@@ -1213,7 +1369,7 @@ button {
 
 /* The written movement breakdown is reference detail, not a from-across-the-room
    signal — drop it in TV mode to give the clock room. */
-.timer-view.tv .segment-list {
+.timer-view.tv .workout-timeline {
   display: none;
 }
 

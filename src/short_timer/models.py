@@ -47,6 +47,34 @@ class Movement(BaseModel):
     notes: str | None = None
 
 
+#: Text that means "this leg is recovery, not work". Deliberately small and
+#: matched whole: `is_rest` is inferred only from a segment that says nothing
+#: *but* one of these, so "16 Renegade Rows" is never mistaken for a breather.
+_REST_WORDS = frozenset(
+    {
+        "rest",
+        "rest period",
+        "recovery",
+        "active recovery",
+        "complete rest",
+        "full rest",
+    }
+)
+
+
+def _is_rest_word(text: str | None) -> bool:
+    if not text:
+        return False
+    return text.strip().strip(".!:").casefold() in _REST_WORDS
+
+
+def _is_rest_movement(movement: Movement) -> bool:
+    """A movement that's really a breather: named rest, with nothing to do."""
+    if movement.reps or movement.calories or movement.distance or movement.load:
+        return False
+    return _is_rest_word(movement.name)
+
+
 class WorkoutSegment(BaseModel):
     """An ordered chunk of movements, e.g. one round of a chipper.
 
@@ -60,6 +88,11 @@ class WorkoutSegment(BaseModel):
     work durations, which the workout-level scalars alone can't express. Both
     fall back to the workout-level values, so a uniform "6 x 3 minutes" leaves
     them unset and reads exactly as it did before these existed.
+
+    `is_rest` marks a leg that *is* the recovery — an EMOM whose fifth minute
+    reads "Rest". That's different from `rest_seconds`, which is recovery
+    appended to a leg of work; here the leg's whole duration is the rest, and
+    the clock should say so rather than announce a movement nobody performs.
     """
 
     label: str | None = None
@@ -67,7 +100,26 @@ class WorkoutSegment(BaseModel):
     rep_scheme: list[int] | None = None
     work_seconds: int | None = None
     rest_seconds: int | None = None
+    is_rest: bool = False
     movements: list[Movement] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _infer_is_rest(self) -> WorkoutSegment:
+        """Treat a segment that only says "Rest" as a rest leg.
+
+        The flag is what the timer reads, but a rest minute has always arrived
+        as a movement named "Rest" — from the parser, from the MCP tool, and in
+        every workout already saved. Inferring here means those keep working
+        without a migration or a re-parse, and it only ever turns the flag
+        *on*: a segment with real work in it is never reinterpreted.
+        """
+        if self.is_rest:
+            return self
+        if self.movements:
+            self.is_rest = all(_is_rest_movement(m) for m in self.movements)
+        else:
+            self.is_rest = _is_rest_word(self.label)
+        return self
 
 
 class Workout(BaseModel):
