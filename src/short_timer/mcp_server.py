@@ -15,13 +15,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from short_timer.db import get_workouts_collection
 from short_timer.llm import parse_workout_text
 from short_timer.models import Movement, Workout, WorkoutMode, WorkoutSegment
 
-mcp = FastMCP("short-timer")
+#: `MCPServer` is what the SDK's FastMCP became in mcp 2.0 — same decorator,
+#: same schema-from-type-hints. The tools below are unchanged by the move.
+mcp = MCPServer("short-timer")
 
 
 def _to_document(workout: Workout) -> dict[str, Any]:
