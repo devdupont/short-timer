@@ -168,6 +168,20 @@ class WorkoutCreateRequest(BaseModel):
     workout: Workout
 
 
+class WorkoutPage(BaseModel):
+    """One page of a library listing.
+
+    `total` counts everything matching the query, not just this page, so the
+    client can render "showing 1-25 of 120" and know whether a next page
+    exists without asking for it.
+    """
+
+    items: list[Workout]
+    total: int
+    limit: int
+    offset: int
+
+
 class SeedResponse(BaseModel):
     """Outcome of seeding the benchmark workouts into the library."""
 

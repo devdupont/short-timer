@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -52,7 +54,7 @@ async def test_login_then_crud_flow(authed_client: AsyncClient) -> None:
 
     listed = await authed_client.get("/api/workouts")
     assert listed.status_code == 200
-    assert any(w["id"] == workout_id for w in listed.json())
+    assert any(w["id"] == workout_id for w in listed.json()["items"])
 
     fetched = await authed_client.get(f"/api/workouts/{workout_id}")
     assert fetched.status_code == 200
@@ -111,7 +113,7 @@ async def test_create_is_idempotent_by_source_text(authed_client: AsyncClient) -
     assert second.json()["id"] == first.json()["id"]
 
     listed = await authed_client.get("/api/workouts")
-    assert len(listed.json()) == 1
+    assert listed.json()["total"] == 1
 
 
 async def test_parse_reuses_saved_workout_without_calling_llm(
@@ -159,7 +161,7 @@ async def test_backfill_restores_dedup_for_legacy_rows(authed_client: AsyncClien
         },
     )
     assert again.json()["id"] == legacy_id
-    assert len((await authed_client.get("/api/workouts")).json()) == 1
+    assert (await authed_client.get("/api/workouts")).json()["total"] == 1
 
 
 async def test_another_owners_workout_is_invisible(
@@ -183,7 +185,7 @@ async def test_another_owners_workout_is_invisible(
         }
     )
 
-    assert (await authed_client.get("/api/workouts")).json() == []
+    assert (await authed_client.get("/api/workouts")).json()["items"] == []
     assert (await authed_client.get("/api/workouts/not-mine")).status_code == 404
     assert (await authed_client.delete("/api/workouts/not-mine")).status_code == 404
 
@@ -220,7 +222,7 @@ async def test_loading_a_prewarmed_wod_costs_no_llm_call(
 
     # Saved into this owner's library, and repeat loads stay free.
     listed = await authed_client.get("/api/workouts")
-    assert len(listed.json()) == 1
+    assert listed.json()["total"] == 1
     again = await authed_client.post("/api/workouts/from-text", json={"text": text})
     assert again.json()["id"] == saved.json()["id"]
 
@@ -296,14 +298,14 @@ async def test_seed_benchmarks_is_idempotent(authed_client: AsyncClient) -> None
     assert first.json()["skipped"] == 0
 
     listed = await authed_client.get("/api/workouts")
-    names = {w["name"] for w in listed.json()}
+    names = {w["name"] for w in listed.json()["items"]}
     assert {"Murph", "Cindy", "Fran"} <= names
-    assert len(listed.json()) == first.json()["added"]
+    assert listed.json()["total"] == first.json()["added"]
 
     # Seeding again adds nothing and doesn't duplicate.
     second = await authed_client.post("/api/workouts/seed")
     assert second.json() == {"added": 0, "skipped": first.json()["added"]}
-    assert len((await authed_client.get("/api/workouts")).json()) == first.json()["added"]
+    assert (await authed_client.get("/api/workouts")).json()["total"] == first.json()["added"]
 
 
 async def test_from_text_creates_then_caches(
@@ -327,4 +329,111 @@ async def test_from_text_creates_then_caches(
     assert first.json()["id"] == second.json()["id"]
     assert calls == 1  # parsed once, reused thereafter
     listed = await authed_client.get("/api/workouts")
-    assert len(listed.json()) == 1
+    assert listed.json()["total"] == 1
+
+
+async def _save(client: AsyncClient, workout: Workout) -> str:
+    response = await client.post("/api/workouts", json={"workout": workout.model_dump(mode="json")})
+    assert response.status_code == 201
+    return str(response.json()["id"])
+
+
+def _dated(name: str, day: int, **fields: object) -> Workout:
+    """A workout with a fixed creation date, so listing order is deterministic."""
+    created = datetime(2026, 1, day, tzinfo=UTC)
+    return _fran().model_copy(
+        update={"name": name, "created_at": created, "updated_at": created, **fields}
+    )
+
+
+async def test_list_pages_newest_first(authed_client: AsyncClient) -> None:
+    for day in range(1, 8):
+        await _save(authed_client, _dated(f"Day {day}", day))
+
+    first = await authed_client.get("/api/workouts", params={"limit": 3})
+    assert first.status_code == 200
+    body = first.json()
+    assert body["total"] == 7
+    assert body["limit"] == 3
+    assert body["offset"] == 0
+    assert [w["name"] for w in body["items"]] == ["Day 7", "Day 6", "Day 5"]
+
+    middle = await authed_client.get("/api/workouts", params={"limit": 3, "offset": 3})
+    assert [w["name"] for w in middle.json()["items"]] == ["Day 4", "Day 3", "Day 2"]
+
+    # The last page is short, and the total still describes the whole library.
+    last = await authed_client.get("/api/workouts", params={"limit": 3, "offset": 6})
+    assert [w["name"] for w in last.json()["items"]] == ["Day 1"]
+    assert last.json()["total"] == 7
+
+    # Past the end is empty, not an error — a delete can leave a client here.
+    past = await authed_client.get("/api/workouts", params={"limit": 3, "offset": 99})
+    assert past.status_code == 200
+    assert past.json()["items"] == []
+    assert past.json()["total"] == 7
+
+
+@pytest.mark.parametrize(
+    "params",
+    [{"limit": 0}, {"limit": 101}, {"offset": -1}, {"q": "x" * 201}],
+)
+async def test_list_rejects_out_of_range_paging(
+    authed_client: AsyncClient, params: dict[str, object]
+) -> None:
+    response = await authed_client.get("/api/workouts", params=params)
+    assert response.status_code == 422
+
+
+async def test_search_spans_the_whole_library_not_just_the_page(
+    authed_client: AsyncClient,
+) -> None:
+    """The point of searching server-side: the match may be pages deep."""
+    await _save(authed_client, _dated("Needle", 1))
+    for day in range(2, 10):
+        await _save(authed_client, _dated(f"Filler {day}", day))
+
+    response = await authed_client.get("/api/workouts", params={"limit": 3, "q": "needle"})
+    body = response.json()
+    assert body["total"] == 1
+    assert [w["name"] for w in body["items"]] == ["Needle"]
+
+
+async def test_search_matches_the_fields_the_row_shows(authed_client: AsyncClient) -> None:
+    await _save(authed_client, _dated("Fran", 1, category="benchmark"))
+    await _save(
+        authed_client,
+        _dated(
+            "Cindy",
+            2,
+            mode=WorkoutMode.AMRAP,
+            category="girls",
+            segments=[WorkoutSegment(movements=[Movement(name="Air squat")])],
+        ),
+    )
+
+    async def names(query: str) -> list[str]:
+        response = await authed_client.get("/api/workouts", params={"q": query})
+        return [w["name"] for w in response.json()["items"]]
+
+    assert await names("cindy") == ["Cindy"]  # name
+    assert await names("girls") == ["Cindy"]  # category
+    assert await names("squat") == ["Cindy"]  # a movement inside the workout
+    assert await names("amrap") == ["Cindy"]  # the mode as the UI labels it
+    assert await names("for time") == ["Fran"]  # ...including a two-word label
+    assert await names("thruster") == ["Fran"]  # Fran's segments, untouched
+
+    # Terms are AND-ed, so adding one narrows rather than widens.
+    assert await names("squat girls") == ["Cindy"]
+    assert await names("squat benchmark") == []
+
+
+async def test_search_treats_the_query_literally(authed_client: AsyncClient) -> None:
+    """Regex metacharacters are text to search for, not a pattern to run."""
+    await _save(authed_client, _dated("Fran (scaled)", 1))
+    await _save(authed_client, _dated("Helen", 2))
+
+    matched = await authed_client.get("/api/workouts", params={"q": "(scaled)"})
+    assert [w["name"] for w in matched.json()["items"]] == ["Fran (scaled)"]
+
+    unmatched = await authed_client.get("/api/workouts", params={"q": ".*"})
+    assert unmatched.json()["total"] == 0

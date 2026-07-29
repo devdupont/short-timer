@@ -47,6 +47,14 @@ export interface Workout {
   updated_at: string;
 }
 
+/** One page of the library listing. `total` counts every match, not just this page. */
+export interface WorkoutPage {
+  items: Workout[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export interface WodEntry {
   date: string;
   title: string;

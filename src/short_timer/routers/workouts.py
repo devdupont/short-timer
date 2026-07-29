@@ -1,6 +1,7 @@
+import re
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from short_timer.auth import current_owner, require_session
 from short_timer.benchmarks import benchmark_workouts
@@ -11,6 +12,8 @@ from short_timer.models import (
     SeedResponse,
     Workout,
     WorkoutCreateRequest,
+    WorkoutMode,
+    WorkoutPage,
     WorkoutParseRequest,
 )
 from short_timer.parse_cache import find_parse, remember_parse
@@ -25,6 +28,66 @@ from short_timer.ratelimit import (
 router = APIRouter(
     prefix="/api/workouts", tags=["workouts"], dependencies=[Depends(require_session)]
 )
+
+#: Default page size for the library listing, and the ceiling a client may ask
+#: for. Small enough that the first page is quick on a phone, large enough that
+#: most libraries are one or two pages.
+_DEFAULT_LIMIT = 25
+_MAX_LIMIT = 100
+
+#: How each mode reads in the UI, so searching "for time" or "amrap" finds the
+#: workouts the user sees labelled that way. Mirrors `MODE_LABELS` in
+#: `web/src/types.ts`; the stored value ("for_time") is matched too.
+_MODE_LABELS = {
+    WorkoutMode.FOR_TIME: "For Time",
+    WorkoutMode.AMRAP: "AMRAP",
+    WorkoutMode.EMOM: "EMOM",
+    WorkoutMode.TABATA: "Tabata",
+    WorkoutMode.INTERVAL: "Interval",
+    WorkoutMode.CUSTOM: "Custom",
+}
+
+#: The fields a library search looks at — the same ones the row displays, plus
+#: what's inside it, so "thruster" finds Fran.
+_SEARCH_FIELDS = (
+    "name",
+    "description",
+    "category",
+    "segments.label",
+    "segments.movements.name",
+)
+
+
+def _term_clause(term: str) -> dict[str, Any]:
+    """Match a single search term against any searchable field."""
+    # Escaped: the term is user input, and an unescaped regex is both a way to
+    # match things the user didn't mean and a way to hand Mongo a pathological
+    # pattern.
+    pattern = re.escape(term)
+    clauses: list[dict[str, Any]] = [
+        {field: {"$regex": pattern, "$options": "i"}} for field in _SEARCH_FIELDS
+    ]
+    modes = [
+        mode.value
+        for mode, label in _MODE_LABELS.items()
+        if term in label.lower() or term in mode.value
+    ]
+    if modes:
+        clauses.append({"mode": {"$in": modes}})
+    return {"$or": clauses}
+
+
+def _library_filter(owner_id: str, query: str | None) -> dict[str, Any]:
+    """Build the Mongo filter for one owner's library, narrowed by `query`.
+
+    Terms are AND-ed: "amrap cindy" means both, in any field, matching how the
+    search box behaved when it filtered an already-loaded list.
+    """
+    mongo_filter: dict[str, Any] = {"owner_id": owner_id}
+    terms = (query or "").lower().split()
+    if terms:
+        mongo_filter["$and"] = [_term_clause(term) for term in terms]
+    return mongo_filter
 
 
 def _to_document(workout: Workout, owner_id: str) -> dict[str, Any]:
@@ -150,11 +213,25 @@ async def create_workout(
     return body.workout
 
 
-@router.get("", response_model=list[Workout])
-async def list_workouts(owner_id: str = Depends(current_owner)) -> list[Workout]:
+@router.get("", response_model=WorkoutPage)
+async def list_workouts(
+    limit: int = Query(_DEFAULT_LIMIT, ge=1, le=_MAX_LIMIT),
+    offset: int = Query(0, ge=0),
+    q: str | None = Query(None, max_length=200),
+    owner_id: str = Depends(current_owner),
+) -> WorkoutPage:
+    """One page of the owner's library, newest first, optionally filtered by `q`.
+
+    Searching server-side rather than in the browser is what keeps paging
+    honest: a filter applied to the current page alone would hide matches
+    sitting on page three.
+    """
     collection = get_workouts_collection()
-    cursor = collection.find({"owner_id": owner_id}).sort("created_at", -1)
-    return [_from_document(doc) async for doc in cursor]
+    mongo_filter = _library_filter(owner_id, q)
+    total = await collection.count_documents(mongo_filter)
+    cursor = collection.find(mongo_filter).sort("created_at", -1).skip(offset).limit(limit)
+    items = [_from_document(doc) async for doc in cursor]
+    return WorkoutPage(items=items, total=total, limit=limit, offset=offset)
 
 
 @router.get("/{workout_id}", response_model=Workout)

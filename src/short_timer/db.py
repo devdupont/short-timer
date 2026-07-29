@@ -70,6 +70,10 @@ async def ensure_indexes() -> None:
     # Dedup lookups are always scoped to an owner, so index the pair.
     await get_workouts_collection().create_index([("owner_id", 1), ("source_hash", 1)])
     await get_workouts_collection().create_index("owner_id")
+    # The library lists one owner's workouts newest-first, a page at a time, so
+    # the sort should come off the index rather than a per-request sort of the
+    # whole library.
+    await get_workouts_collection().create_index([("owner_id", 1), ("created_at", -1)])
     await get_wod_cache_collection().create_index("date")
     await get_concept2_cache_collection().create_index("date")
     # The gym feed always reads one gym's recent days, so index the pair.

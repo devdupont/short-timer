@@ -9,14 +9,23 @@ Two groups of tools:
 - Library: `search_workouts` and `get_workout` read from the same MongoDB
   collection the web app writes to, so any MCP client can pull a saved or
   benchmark workout (Murph, Fran, ...) by name.
+
+Every query here is scoped to one owner (`MCP_OWNER_ID`, defaulting to the
+single shared-passcode user). There's no session to derive that from — this is
+a local stdio tool, not an HTTP caller — but an unscoped read over a
+collection that already carries `owner_id` is a leak waiting for the second
+user to arrive, and an unscoped *write* saves workouts nobody owns.
 """
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 
+from short_timer.auth import DEFAULT_OWNER_ID
+from short_timer.config import get_settings
 from short_timer.db import get_workouts_collection
 from short_timer.llm import parse_workout_text
 from short_timer.models import Movement, Workout, WorkoutMode, WorkoutSegment
@@ -26,9 +35,15 @@ from short_timer.models import Movement, Workout, WorkoutMode, WorkoutSegment
 mcp = MCPServer("short-timer")
 
 
+def _owner_id() -> str:
+    """The library this server acts on."""
+    return get_settings().mcp_owner_id or DEFAULT_OWNER_ID
+
+
 def _to_document(workout: Workout) -> dict[str, Any]:
     doc = workout.model_dump(mode="json")
     doc["_id"] = doc.pop("id")
+    doc["owner_id"] = _owner_id()
     return doc
 
 
@@ -103,11 +118,14 @@ async def create_timer_workout(
 @mcp.tool()
 async def search_workouts(query: str = "", category: str | None = None) -> list[dict[str, Any]]:
     """Search the saved workout library by name/description substring and/or category."""
-    mongo_query: dict[str, Any] = {}
+    mongo_query: dict[str, Any] = {"owner_id": _owner_id()}
     if query:
+        # Escaped, so a query like "5+" is text to find rather than a pattern
+        # for Mongo to run.
+        pattern = re.escape(query)
         mongo_query["$or"] = [
-            {"name": {"$regex": query, "$options": "i"}},
-            {"description": {"$regex": query, "$options": "i"}},
+            {"name": {"$regex": pattern, "$options": "i"}},
+            {"description": {"$regex": pattern, "$options": "i"}},
         ]
     if category:
         mongo_query["category"] = category
@@ -120,7 +138,7 @@ async def search_workouts(query: str = "", category: str | None = None) -> list[
 async def get_workout(workout_id: str) -> dict[str, Any] | None:
     """Fetch a single saved workout by id."""
     collection = get_workouts_collection()
-    doc = await collection.find_one({"_id": workout_id})
+    doc = await collection.find_one({"_id": workout_id, "owner_id": _owner_id()})
     return _from_document(doc) if doc else None
 
 

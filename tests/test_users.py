@@ -100,7 +100,7 @@ async def test_existing_workouts_survive_the_session_change(authed_client: Async
     )
     listed = await authed_client.get("/api/workouts")
     assert listed.status_code == 200
-    assert any(w["name"] == "Legacy" for w in listed.json())
+    assert any(w["name"] == "Legacy" for w in listed.json()["items"])
 
 
 # --- /api/me -----------------------------------------------------------------
