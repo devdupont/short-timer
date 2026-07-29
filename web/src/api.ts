@@ -6,6 +6,7 @@ import type {
   UserConfigUpdate,
   WodEntry,
   Workout,
+  WorkoutPage,
 } from "./types";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
@@ -96,8 +97,24 @@ export function seedBenchmarks(): Promise<{ added: number; skipped: number }> {
   return request("/api/workouts/seed", { method: "POST" });
 }
 
-export function listWorkouts(): Promise<Workout[]> {
-  return request("/api/workouts");
+/**
+ * One page of the saved library, newest first.
+ *
+ * `q` is matched server-side across name, description, category, mode and the
+ * movements inside each workout, so a search spans the whole library rather
+ * than the page currently on screen.
+ */
+export function listWorkouts(params?: {
+  limit?: number;
+  offset?: number;
+  q?: string;
+}): Promise<WorkoutPage> {
+  const search = new URLSearchParams();
+  if (params?.limit !== undefined) search.set("limit", String(params.limit));
+  if (params?.offset) search.set("offset", String(params.offset));
+  if (params?.q) search.set("q", params.q);
+  const query = search.toString();
+  return request(`/api/workouts${query ? `?${query}` : ""}`);
 }
 
 export function getWorkout(id: string): Promise<Workout> {

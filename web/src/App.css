@@ -845,6 +845,25 @@ button {
   margin-top: 4px;
 }
 
+.library-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.library-pager .secondary-button {
+  padding: 8px 14px;
+}
+
+.library-pager-status {
+  color: var(--text);
+  font-size: 14px;
+  text-align: center;
+  flex: 1;
+}
+
 .timer-view {
   position: relative;
   width: 100%;
