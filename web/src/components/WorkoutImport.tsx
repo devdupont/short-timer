@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ApiError, createWorkout, parseWorkout } from "../api";
+import { WorkoutTimeline } from "./WorkoutTimeline";
 import type { Workout } from "../types";
 import { MODE_LABELS } from "../types";
 
@@ -91,18 +92,10 @@ export function WorkoutImport({
             </div>
           </div>
           {preview.description && <p className="section-sub">{preview.description}</p>}
-          <ol className="segment-list">
-            {preview.segments.map((segment, i) => (
-              <li key={i}>
-                {segment.label && <strong>{segment.label}: </strong>}
-                {segment.rounds && <em>{segment.rounds} rounds — </em>}
-                {segment.movements
-                  .map((m) => [m.reps, m.name, m.load].filter(Boolean).join(" "))
-                  .filter(Boolean)
-                  .join(", ")}
-              </li>
-            ))}
-          </ol>
+          {/* Drawn from the timer's own reading of the parse, so a wrong
+              answer — a rest minute read as a movement, a leg the wrong
+              length — shows up here rather than mid-workout. */}
+          <WorkoutTimeline workout={preview} />
           <div className="builder-actions">
             <button className="primary-button" onClick={handleSave} disabled={saving}>
               {saving ? "Saving…" : "Save to library"}

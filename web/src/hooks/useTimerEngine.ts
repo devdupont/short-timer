@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Workout, WorkoutSegment } from "../types";
+import type { Workout } from "../types";
+import type { IntervalPlan } from "../timerPlan";
+import { buildPlan, isIntervalMode, legAt, movementLabel, planTotalDuration } from "../timerPlan";
 
 export type TimerStatus = "idle" | "countdown" | "running" | "paused" | "finished";
 export type TimerPhase = "work" | "rest";
@@ -32,143 +34,6 @@ export interface TimerState {
 
 const TICK_MS = 100;
 
-function movementLabel(segment: WorkoutSegment | undefined): string | null {
-  if (!segment) return null;
-  const text = segment.movements
-    .map((m) => [m.reps, m.name, m.distance, m.load].filter(Boolean).join(" "))
-    .filter(Boolean)
-    .join(", ");
-  return text || segment.label || null;
-}
-
-function isIntervalMode(workout: Workout): boolean {
-  return workout.mode === "emom" || workout.mode === "tabata" || workout.mode === "interval";
-}
-
-/**
- * Interval workouts come in two shapes we need to tell apart:
- *
- * - Rotation: every segment is one leg of a single round (e.g. Chelsea's
- *   pull-ups/push-ups/air-squats all inside one minute, or an EMOM that
- *   assigns a different movement to each minute of a 3-minute set). Rest
- *   happens once, after the round finishes.
- * - Blocks: a segment carries its own `rounds`, meaning it's a fully
- *   self-contained sub-workout (e.g. tabata run separately on each of four
- *   movements). Blocks run back to back.
- *
- * A segment with its own `rounds` is what distinguishes the two.
- */
-function isBlockPlan(workout: Workout): boolean {
-  return workout.segments.some((s) => (s.rounds ?? 0) > 0);
-}
-
-/**
- * One leg of a round, with its duration already resolved.
- *
- * Segments may carry their own `work_seconds`/`rest_seconds` — that's how a
- * "5/4/3/2/1 minutes" ladder says each leg is a different length. Resolving
- * them once here means the arithmetic below never has to care whether a
- * duration came from the segment or from the workout.
- */
-interface Leg {
-  segment: WorkoutSegment | undefined;
-  work: number;
-  rest: number;
-  /** Offset of this leg's start from the beginning of its round. */
-  start: number;
-}
-
-interface RotationPlan {
-  kind: "rotation";
-  legs: Leg[];
-  roundLength: number;
-  totalRounds: number | null;
-}
-
-interface BlockPlan {
-  kind: "blocks";
-  blocks: { leg: Leg; rounds: number; blockLength: number; cumStart: number }[];
-  totalLength: number | null;
-}
-
-type IntervalPlan = RotationPlan | BlockPlan;
-
-/**
- * Resolve each segment's work/rest into a flat list of legs.
- *
- * A segment that names its own `rest_seconds` always rests where it says —
- * that's what a ladder needs, since every rung has its own recovery. Where a
- * segment is silent, the default depends on the plan shape, which is why
- * `restAfterEveryLeg` has to be passed in:
- *
- * - In a rotation the legs are movements *within* one round, so the round
- *   rests once at the end — only the last leg inherits the workout's rest.
- * - In a block plan each leg is a self-contained sub-workout that repeats
- *   internally, so every one of them inherits it.
- */
-function resolveLegs(workout: Workout, restAfterEveryLeg: boolean): Leg[] {
-  const workSeconds = workout.work_seconds ?? 60;
-  const restSeconds = workout.rest_seconds ?? 0;
-  // No segments at all still means one leg, so an interval workout with
-  // nothing but a work/rest pair on it still runs.
-  const segments: (WorkoutSegment | undefined)[] = workout.segments.length
-    ? workout.segments
-    : [undefined];
-
-  let start = 0;
-  return segments.map((segment, index) => {
-    const work = segment?.work_seconds ?? workSeconds;
-    const inheritsRest = restAfterEveryLeg || index === segments.length - 1;
-    const rest = segment?.rest_seconds ?? (inheritsRest ? restSeconds : 0);
-    const leg = { segment, work, rest, start };
-    start += work + rest;
-    return leg;
-  });
-}
-
-function buildPlan(workout: Workout): IntervalPlan {
-  const asBlocks = isBlockPlan(workout);
-  const legs = resolveLegs(workout, asBlocks);
-
-  if (asBlocks) {
-    let cumStart = 0;
-    const blocks = legs.map((leg) => {
-      const rounds = leg.segment?.rounds ?? workout.rounds ?? 1;
-      const blockLength = rounds * (leg.work + leg.rest);
-      const block = { leg, rounds, blockLength, cumStart };
-      cumStart += blockLength;
-      return block;
-    });
-    return { kind: "blocks", blocks, totalLength: blocks.length ? cumStart : null };
-  }
-
-  const last = legs[legs.length - 1];
-  return {
-    kind: "rotation",
-    legs,
-    roundLength: last.start + last.work + last.rest,
-    totalRounds: workout.rounds ?? null,
-  };
-}
-
-/** The leg covering `offset` within a round, and how far into it we are. */
-function legAt(legs: Leg[], offset: number): { leg: Leg; index: number; intoLeg: number } {
-  let index = 0;
-  for (let i = legs.length - 1; i >= 0; i--) {
-    if (offset >= legs[i].start) {
-      index = i;
-      break;
-    }
-  }
-  return { leg: legs[index], index, intoLeg: offset - legs[index].start };
-}
-
-/** Total workout duration, if bounded; null means it runs until stopped. */
-function planTotalDuration(plan: IntervalPlan): number | null {
-  if (plan.kind === "blocks") return plan.totalLength;
-  return plan.totalRounds ? plan.totalRounds * plan.roundLength : null;
-}
-
 function deriveIntervalState(plan: IntervalPlan, elapsedSeconds: number): Omit<TimerState, "status" | "countdownRemaining"> {
   if (plan.kind === "rotation") {
     const { legs, roundLength, totalRounds } = plan;
@@ -176,7 +41,10 @@ function deriveIntervalState(plan: IntervalPlan, elapsedSeconds: number): Omit<T
     const round = Math.floor(elapsedSeconds / roundLength) + 1;
     const intoRound = elapsedSeconds % roundLength;
     const { leg, index, intoLeg } = legAt(legs, intoRound);
-    const inWork = intoLeg < leg.work;
+    // A rest leg is rest for its whole length — there's no work half of it to
+    // be inside. Everything downstream (the phase colour, the rest tone, the
+    // movement readout) follows from this one flag.
+    const inWork = !leg.isRest && intoLeg < leg.work;
     const remaining = inWork ? leg.work - intoLeg : leg.work + leg.rest - intoLeg;
     return {
       elapsedSeconds,
@@ -205,7 +73,7 @@ function deriveIntervalState(plan: IntervalPlan, elapsedSeconds: number): Omit<T
   const legLength = block ? block.leg.work + block.leg.rest || 1 : 1;
   const subRound = Math.min(block?.rounds ?? 1, Math.floor(intoBlock / legLength) + 1);
   const intoLeg = intoBlock % legLength;
-  const inWork = block ? intoLeg < block.leg.work : true;
+  const inWork = block ? !block.leg.isRest && intoLeg < block.leg.work : true;
   const remaining = inWork && block ? block.leg.work - intoLeg : legLength - intoLeg;
 
   return {
@@ -215,9 +83,14 @@ function deriveIntervalState(plan: IntervalPlan, elapsedSeconds: number): Omit<T
     totalRounds: blocks.length || null,
     phase: inWork ? "work" : "rest",
     overCap: false,
-    currentMovement: block
-      ? [movementLabel(block.leg.segment), `${subRound}/${block.rounds}`].filter(Boolean).join(" — ")
-      : null,
+    // Kept up during a block's rest so you can see which movement's block
+    // you're in and how far through it — but a rest *leg* has nothing to name.
+    currentMovement:
+      block && !block.leg.isRest
+        ? [movementLabel(block.leg.segment), `${subRound}/${block.rounds}`]
+            .filter(Boolean)
+            .join(" — ")
+        : null,
     legNumber: null,
     totalLegs: null,
     capSeconds: null,

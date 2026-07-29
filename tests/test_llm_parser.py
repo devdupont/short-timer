@@ -81,6 +81,37 @@ async def test_parse_workout_text_forces_the_emit_workout_tool(
     assert captured["tools"][0]["name"] == "emit_workout"
 
 
+async def test_parse_flags_a_rest_leg(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Either way the model writes a rest minute, it reaches the clock as rest."""
+    _patch_anthropic(
+        monkeypatch,
+        {
+            "name": "EMOM",
+            "mode": "emom",
+            "rounds": 3,
+            "work_seconds": 60,
+            "segments": [
+                {"movements": [{"name": "Row", "calories": 16}]},
+                {"is_rest": True, "movements": []},
+                {"movements": [{"name": "Rest"}]},
+            ],
+        },
+    )
+
+    workout = await llm.parse_workout_text("15:00 EMOM")
+
+    assert [s.is_rest for s in workout.segments] == [False, True, True]
+
+
+async def test_workout_tool_offers_is_rest(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _patch_anthropic(monkeypatch, {"name": "x", "mode": "emom", "segments": []})
+
+    await llm.parse_workout_text("15:00 EMOM")
+
+    segment_schema = captured["tools"][0]["input_schema"]["properties"]["segments"]["items"]
+    assert "is_rest" in segment_schema["properties"]
+
+
 async def test_parse_workout_text_raises_without_tool_use(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_anthropic(monkeypatch, None)
 
@@ -122,6 +153,12 @@ async def test_fixture_parses_to_expected_shape(fixture: dict[str, Any]) -> None
         assert workout.rest_seconds == fixture["expected_rest_seconds"]
     if "expected_min_segments" in fixture:
         assert len(workout.segments) >= fixture["expected_min_segments"]
+    if "expected_rest_segments" in fixture:
+        # A rest minute has to land as a rest *leg*, not as a movement called
+        # "Rest" — that's the difference between the clock resting and the
+        # clock telling an athlete to go do something named rest.
+        rest_indexes = [i for i, s in enumerate(workout.segments) if s.is_rest]
+        assert rest_indexes == fixture["expected_rest_segments"]
     if "expected_segment_work_seconds" in fixture:
         # A ladder's legs differ in length, so the durations have to land in the
         # segments — a duration left in prose is one the timer can't run.

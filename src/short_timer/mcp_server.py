@@ -59,9 +59,16 @@ async def create_timer_workout(
     """Build and save a Workout directly from structured fields.
 
     `segments` is a list of objects shaped like
-    `{"label": str?, "rounds": int?, "rep_scheme": [int]?, "movements": [...]}`
+    `{"label": str?, "rounds": int?, "rep_scheme": [int]?, "work_seconds": int?,
+    "rest_seconds": int?, "is_rest": bool?, "movements": [...]}`
     where each movement is `{"name": str, "reps": int?, "distance": str?,
     "calories": int?, "load": str?, "notes": str?}`.
+
+    A segment's `work_seconds`/`rest_seconds` override the workout-level pair
+    for that leg alone, which is how a ladder ("5/4/3/2/1 minutes") is built.
+    `is_rest` marks a leg that is itself the recovery — an EMOM minute that
+    just says "Rest" — so the clock runs it as a rest period; give it no
+    movements.
     """
     workout = Workout(
         name=name,
@@ -78,6 +85,9 @@ async def create_timer_workout(
                 label=segment.get("label"),
                 rounds=segment.get("rounds"),
                 rep_scheme=segment.get("rep_scheme"),
+                work_seconds=segment.get("work_seconds"),
+                rest_seconds=segment.get("rest_seconds"),
+                is_rest=bool(segment.get("is_rest", False)),
                 movements=[Movement(**m) for m in segment.get("movements", [])],
             )
             for segment in segments

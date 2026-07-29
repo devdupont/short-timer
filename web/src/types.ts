@@ -20,6 +20,12 @@ export interface WorkoutSegment {
    */
   work_seconds?: number | null;
   rest_seconds?: number | null;
+  /**
+   * This leg *is* the recovery — an EMOM whose "Minute 5: Rest". Distinct from
+   * `rest_seconds`, which appends recovery to a leg of work: here the leg's
+   * whole duration runs as rest, and the clock says so.
+   */
+  is_rest?: boolean | null;
   movements: Movement[];
 }
 

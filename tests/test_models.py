@@ -54,3 +54,39 @@ def test_segment_durations_default_to_unset() -> None:
     segment = WorkoutSegment(movements=[Movement(name="Row")])
     assert segment.work_seconds is None
     assert segment.rest_seconds is None
+
+
+def test_a_segment_that_only_says_rest_is_a_rest_leg() -> None:
+    """An EMOM's rest minute arrives as a movement; the clock needs the flag."""
+    assert WorkoutSegment(movements=[Movement(name="Rest")]).is_rest
+    assert WorkoutSegment(label="Rest", movements=[]).is_rest
+    assert WorkoutSegment(movements=[Movement(name="Rest.", notes="walk it off")]).is_rest
+
+
+def test_work_is_never_reinterpreted_as_rest() -> None:
+    assert not WorkoutSegment(movements=[Movement(name="Row", calories=16)]).is_rest
+    # A named movement wins over a label — "rest round" still has rows in it.
+    assert not WorkoutSegment(label="Rest", movements=[Movement(name="Renegade Row")]).is_rest
+    # Rest is never *inferred* from an empty segment, only from something saying so.
+    assert not WorkoutSegment(movements=[]).is_rest
+    assert not WorkoutSegment(movements=[Movement(reps=10)]).is_rest
+
+
+def test_rest_leg_survives_round_trip() -> None:
+    """The EMOM shape this exists for: four working minutes, then one off."""
+    workout = Workout(
+        name="15:00 EMOM",
+        mode=WorkoutMode.EMOM,
+        rounds=3,
+        work_seconds=60,
+        segments=[
+            WorkoutSegment(movements=[Movement(name="Row", calories=16)]),
+            WorkoutSegment(movements=[Movement(name="GHD Sit-Up", reps=16)]),
+            WorkoutSegment(movements=[Movement(name="Wall Walk", reps=3)]),
+            WorkoutSegment(movements=[Movement(name="Renegade Row", reps=16, load="50/35 lb")]),
+            WorkoutSegment(is_rest=True),
+        ],
+    )
+
+    restored = Workout.model_validate(workout.model_dump(mode="json"))
+    assert [s.is_rest for s in restored.segments] == [False, False, False, False, True]

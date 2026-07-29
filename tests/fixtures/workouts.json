@@ -225,5 +225,23 @@
       120
     ],
     "expected_movements": []
+  },
+  {
+    "name": "EMOM with a rest minute",
+    "category": "custom",
+    "source_text": "15:00 EMOM\nMinute 1: 16/13 Calorie Row\nMinute 2: 16 GHD Sit-Ups\nMinute 3: 3 Wall Walks\nMinute 4: 16 Renegade Rows ( 2 x 50/35lb)\nMinute 5: Rest",
+    "expected_mode": "emom",
+    "expected_rounds": 3,
+    "expected_work_seconds": 60,
+    "expected_min_segments": 5,
+    "expected_rest_segments": [
+      4
+    ],
+    "expected_movements": [
+      "row",
+      "ghd sit-up",
+      "wall walk",
+      "renegade row"
+    ]
   }
 ]

@@ -23,7 +23,16 @@ that tells the timer how to run the clock, plus an ordered list of
 `segments` describing what to do. Segments can nest their own `rounds` and
 `rep_scheme`, which is what lets something like Murph (a for-time chipper
 with a 20-round partition sandwiched between two runs) and Fran (a flat
-21-15-9 for time) share one schema. See `src/short_timer/models.py`.
+21-15-9 for time) share one schema. A segment can also carry its own
+`work_seconds`/`rest_seconds` (a "5/4/3/2/1 minutes" ladder is five legs of
+different lengths) or set `is_rest` to say the leg *is* the recovery — an
+EMOM whose "Minute 5: Rest" — so the clock runs it as a rest period instead
+of announcing a movement nobody performs. See `src/short_timer/models.py`.
+
+`web/src/timerPlan.ts` turns that shape into the plan the clock runs, and the
+visualizer (`WorkoutTimeline`) draws the same plan to scale — colour-coded by
+movement, rest striped — so a bad parse is visible in the paste preview or
+the builder without starting a timer to find it.
 
 ## Requirements
 
