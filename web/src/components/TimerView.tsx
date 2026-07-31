@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTimerEngine } from "../hooks/useTimerEngine";
 import { useTimerAudio } from "../hooks/useTimerAudio";
+import { useWakeLock } from "../hooks/useWakeLock";
 import { WorkoutTimeline } from "./WorkoutTimeline";
 import type { Workout } from "../types";
 import { isUntimed, MODE_LABELS } from "../types";
@@ -108,6 +109,14 @@ function ClockView({ workout }: { workout: Workout }) {
   // when available, but the CSS layout is the source of truth so it still
   // works where the Fullscreen API is blocked (e.g. embedded previews).
   const [tv, setTv] = useState(false);
+
+  // Hold the screen awake whenever the display is the point: a clock that's
+  // counting (paused included — that's a workout mid-flight, not an idle
+  // page), or TV mode, which is someone saying this screen is a wall display
+  // before they've pressed Start.
+  useWakeLock(
+    tv || state.status === "countdown" || state.status === "running" || state.status === "paused",
+  );
 
   useEffect(() => {
     try {

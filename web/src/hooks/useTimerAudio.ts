@@ -128,13 +128,26 @@ export function useTimerAudio(state: TimerState, muted: boolean, mode: WorkoutMo
   const modeRef = useRef(mode);
   modeRef.current = mode;
 
-  const ensureCtx = useCallback(() => {
-    if (ctxRef.current === null) {
-      const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (AC) ctxRef.current = new AC();
-    }
+  /**
+   * Ask a parked context to come back, and say whether it can play right now.
+   *
+   * Locking an iPhone parks the page's AudioContext, and WebKit parks it in
+   * its own "interrupted" state — not one of the three the spec defines, so a
+   * `state === "suspended"` check doesn't see it and nothing ever resumed it.
+   * Every later beep then failed a `state !== "running"` guard in silence for
+   * the rest of the session: restarting the clock or loading another workout
+   * reused the same parked context, and only a page reload built a new one.
+   * Hence "not running" rather than any named state.
+   *
+   * This never builds or closes a context, so it's safe to call as often as
+   * there are chances to recover. Safari caps how many AudioContexts a page
+   * may create, and burning through that cap retrying a locked phone would
+   * turn a temporary silence into a permanent one.
+   */
+  const wakeCtx = useCallback(() => {
     const ctx = ctxRef.current;
-    if (ctx && ctx.state === "suspended") ctx.resume().catch(() => {});
+    if (!ctx) return null;
+    if (ctx.state !== "running") ctx.resume().catch(() => {});
     return ctx;
   }, []);
 
@@ -142,17 +155,64 @@ export function useTimerAudio(state: TimerState, muted: boolean, mode: WorkoutMo
    * Prime and resume the audio context. Must be called from a user gesture
    * (the Start button) to satisfy browser autoplay policy; every later beep
    * rides on the context unlocked here.
+   *
+   * A gesture is also the only safe moment to *replace* a context, and the one
+   * time it's worth doing: a context that has been closed — or that won't
+   * resume — is beyond reviving, and pressing Start is an athlete asking for a
+   * working timer.
    */
   const unlock = useCallback(() => {
-    ensureCtx();
-  }, [ensureCtx]);
+    const existing = ctxRef.current;
+    if (existing) {
+      if (existing.state === "closed") {
+        ctxRef.current = null;
+      } else {
+        existing.resume().catch(() => {
+          // Unrecoverable: drop it so the next Start builds a fresh one.
+          if (ctxRef.current === existing) ctxRef.current = null;
+          existing.close().catch(() => {});
+        });
+      }
+    }
+    if (ctxRef.current === null) {
+      const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (AC) ctxRef.current = new AC();
+    }
+    wakeCtx();
+  }, [wakeCtx]);
 
-  const play = useCallback((cue: CueName) => {
-    if (mutedRef.current) return;
-    const ctx = ctxRef.current;
-    if (!ctx || ctx.state !== "running") return;
-    playCue(ctx, CUES[cue]);
-  }, []);
+  const play = useCallback(
+    (cue: CueName) => {
+      if (mutedRef.current) return;
+      // Going through wakeCtx means a cue landing on a parked context asks for
+      // it back. Resuming is async, so *this* beep may still be lost — the one
+      // after it is what the athlete hears.
+      const ctx = wakeCtx();
+      if (!ctx || ctx.state !== "running") return;
+      playCue(ctx, CUES[cue]);
+    },
+    [wakeCtx],
+  );
+
+  /**
+   * Re-arm the audio after the phone comes back.
+   *
+   * Returning to view is the moment WebKit ends an interruption, and a tap is
+   * the moment it will always allow a resume — so both are treated as a chance
+   * to recover, rather than waiting for the next cue to stumble into one.
+   */
+  useEffect(() => {
+    function recover() {
+      if (document.visibilityState !== "visible") return;
+      wakeCtx();
+    }
+    document.addEventListener("visibilitychange", recover);
+    window.addEventListener("pointerdown", recover);
+    return () => {
+      document.removeEventListener("visibilitychange", recover);
+      window.removeEventListener("pointerdown", recover);
+    };
+  }, [wakeCtx]);
 
   useEffect(() => {
     const curr = snapshot(state);
