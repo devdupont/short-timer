@@ -21,6 +21,18 @@ export function isIntervalMode(workout: Workout): boolean {
   return workout.mode === "emom" || workout.mode === "tabata" || workout.mode === "interval";
 }
 
+/**
+ * Whether the clock counts up through each interval leg instead of down.
+ *
+ * The plan is identical either way — same legs, same lengths, same rest. All
+ * that changes is the number the athlete reads: their own elapsed time within
+ * the set, which is what a workout scored by set times needs, since everyone
+ * finishes at a different moment and a shared countdown tells them nothing.
+ */
+export function countsUp(workout: Workout): boolean {
+  return isIntervalMode(workout) && workout.interval_clock === "count_up";
+}
+
 /** A leg that is itself the recovery, e.g. an EMOM's "Minute 5: Rest". */
 export function isRestSegment(segment: WorkoutSegment | undefined): boolean {
   return Boolean(segment?.is_rest);

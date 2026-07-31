@@ -31,6 +31,24 @@ class WorkoutMode(StrEnum):
     CUSTOM = "custom"
 
 
+class IntervalClock(StrEnum):
+    """Which way the clock runs *inside* one leg of an interval workout.
+
+    Counting down is the default and what an EMOM wants: the number on the
+    wall is how long you have left to finish the minute's work.
+
+    Counting up is for interval work that's scored by *when each set
+    finished* — "Every 3:00 x 5 sets ... score = slowest set time". The window
+    is only the container; what an athlete needs to read off the wall is their
+    own split, and they each finish at a different moment, so a shared
+    countdown can't tell them. Same plan, same legs, same rest — only the
+    number the athlete reads changes.
+    """
+
+    COUNT_DOWN = "count_down"
+    COUNT_UP = "count_up"
+
+
 class Movement(BaseModel):
     """A single exercise within a segment.
 
@@ -143,6 +161,10 @@ class Workout(BaseModel):
     work_seconds: int | None = None
     rest_seconds: int | None = None
     rep_scheme: list[int] | None = None
+    #: Which way the clock runs within a leg. Only the interval modes have legs
+    #: to run either way — for_time and amrap already count up against a cap —
+    #: so this is read for emom/tabata/interval and ignored elsewhere.
+    interval_clock: IntervalClock = IntervalClock.COUNT_DOWN
 
     segments: list[WorkoutSegment] = Field(default_factory=list)
 

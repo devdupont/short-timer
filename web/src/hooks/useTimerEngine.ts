@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Workout } from "../types";
 import type { IntervalPlan } from "../timerPlan";
-import { buildPlan, isIntervalMode, legAt, movementLabel, planTotalDuration } from "../timerPlan";
+import {
+  buildPlan,
+  countsUp,
+  isIntervalMode,
+  legAt,
+  movementLabel,
+  planTotalDuration,
+} from "../timerPlan";
 
 export type TimerStatus = "idle" | "countdown" | "running" | "paused" | "finished";
 export type TimerPhase = "work" | "rest";
@@ -14,6 +21,15 @@ export interface TimerState {
   elapsedSeconds: number;
   /** Seconds left in the current countdown/interval leg; null when the clock counts up. */
   remainingSeconds: number | null;
+  /**
+   * Seconds elapsed in the current interval leg — the athlete's own split, and
+   * what the clock should show for a workout scored by set times.
+   *
+   * Null unless the workout counts its legs up *and* work is under way: once a
+   * leg's rest starts, the useful number is `remainingSeconds` again, because
+   * the question has changed from "what was my time" to "when do I go".
+   */
+  legElapsedSeconds: number | null;
   round: number;
   totalRounds: number | null;
   phase: TimerPhase;
@@ -34,7 +50,11 @@ export interface TimerState {
 
 const TICK_MS = 100;
 
-function deriveIntervalState(plan: IntervalPlan, elapsedSeconds: number): Omit<TimerState, "status" | "countdownRemaining"> {
+function deriveIntervalState(
+  plan: IntervalPlan,
+  elapsedSeconds: number,
+  countUp: boolean,
+): Omit<TimerState, "status" | "countdownRemaining"> {
   if (plan.kind === "rotation") {
     const { legs, roundLength, totalRounds } = plan;
     const legCount = legs.length;
@@ -49,6 +69,7 @@ function deriveIntervalState(plan: IntervalPlan, elapsedSeconds: number): Omit<T
     return {
       elapsedSeconds,
       remainingSeconds: Math.max(0, Math.ceil(remaining)),
+      legElapsedSeconds: countUp && inWork ? intoLeg : null,
       round: totalRounds ? Math.min(round, totalRounds) : round,
       totalRounds,
       phase: inWork ? "work" : "rest",
@@ -79,6 +100,7 @@ function deriveIntervalState(plan: IntervalPlan, elapsedSeconds: number): Omit<T
   return {
     elapsedSeconds,
     remainingSeconds: Math.max(0, Math.ceil(remaining)),
+    legElapsedSeconds: countUp && inWork ? intoLeg : null,
     round: blockIndex + 1,
     totalRounds: blocks.length || null,
     phase: inWork ? "work" : "rest",
@@ -99,7 +121,7 @@ function deriveIntervalState(plan: IntervalPlan, elapsedSeconds: number): Omit<T
 
 function deriveState(workout: Workout, elapsedSeconds: number): Omit<TimerState, "status" | "countdownRemaining"> {
   if (isIntervalMode(workout)) {
-    return deriveIntervalState(buildPlan(workout), elapsedSeconds);
+    return deriveIntervalState(buildPlan(workout), elapsedSeconds, countsUp(workout));
   }
 
   // for_time and amrap are single continuous efforts against a cap/window.
@@ -110,6 +132,7 @@ function deriveState(workout: Workout, elapsedSeconds: number): Omit<TimerState,
   return {
     elapsedSeconds,
     remainingSeconds: null,
+    legElapsedSeconds: null,
     round: 1,
     totalRounds: null,
     phase: "work",

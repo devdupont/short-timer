@@ -82,3 +82,26 @@ async def test_owner_is_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert [doc["id"] for doc in await search_workouts(query="Fran")] == [created["id"]]
     assert await get_workout("default-user") is None
+
+
+async def test_created_workout_can_count_its_sets_up() -> None:
+    """Authoring a set-time workout through MCP has to reach the same clock."""
+    created = await create_timer_workout(
+        name="Every 3:00 x 5 Sets",
+        mode="emom",
+        rounds=5,
+        work_seconds=180,
+        interval_clock="count_up",
+        segments=[{"movements": [{"name": "Rope Climb", "reps": 3}]}],
+    )
+
+    assert created["interval_clock"] == "count_up"
+    saved = await get_workout(created["id"])
+    assert saved is not None
+    assert saved["interval_clock"] == "count_up"
+
+
+async def test_created_workouts_count_down_by_default() -> None:
+    created = await create_timer_workout(name="Chelsea", mode="emom", segments=[])
+
+    assert created["interval_clock"] == "count_down"

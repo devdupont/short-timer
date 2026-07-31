@@ -950,6 +950,16 @@ button {
   margin: 0;
 }
 
+/* Time left in the window, under an up-counting set clock. Deliberately quiet:
+   the athlete's own split is the number they're reading. */
+.clock-subtitle {
+  font-size: clamp(16px, 2.4vw, 28px);
+  font-family: var(--mono);
+  color: var(--text);
+  margin: 0 0 10px;
+  font-variant-numeric: tabular-nums;
+}
+
 .time-bar,
 .leg-bar,
 .round-bar {
@@ -1348,6 +1358,10 @@ button {
 
 .timer-view.tv .current-movement {
   font-size: min(9vw, 11vh);
+}
+
+.timer-view.tv .clock-subtitle {
+  font-size: min(3.4vw, 4.2vh);
 }
 
 .timer-view.tv .time-bar,

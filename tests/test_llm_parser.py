@@ -20,7 +20,7 @@ from typing import Any
 import pytest
 
 from short_timer import llm
-from short_timer.models import WorkoutMode
+from short_timer.models import IntervalClock, WorkoutMode
 
 FIXTURES_PATH = Path(__file__).parent / "fixtures" / "workouts.json"
 FIXTURES: list[dict[str, Any]] = json.loads(FIXTURES_PATH.read_text())
@@ -103,6 +103,42 @@ async def test_parse_flags_a_rest_leg(monkeypatch: pytest.MonkeyPatch) -> None:
     assert [s.is_rest for s in workout.segments] == [False, True, True]
 
 
+async def test_parse_keeps_an_up_counting_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A set scored by its finish time has to reach the timer as counting up."""
+    _patch_anthropic(
+        monkeypatch,
+        {
+            "name": "Every 3:00 x 5 Sets",
+            "mode": "interval",
+            "rounds": 5,
+            "work_seconds": 180,
+            "interval_clock": "count_up",
+            "segments": [{"movements": [{"name": "Rope Climb", "reps": 3}]}],
+        },
+    )
+
+    workout = await llm.parse_workout_text("Every 3:00 x 5 Sets\nScore = Slowest Set Time")
+
+    assert workout.interval_clock is IntervalClock.COUNT_UP
+
+
+async def test_parse_defaults_to_counting_down(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_anthropic(monkeypatch, {"name": "Chelsea", "mode": "emom", "segments": []})
+
+    workout = await llm.parse_workout_text("EMOM 30")
+
+    assert workout.interval_clock is IntervalClock.COUNT_DOWN
+
+
+async def test_workout_tool_offers_the_clock_direction(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _patch_anthropic(monkeypatch, {"name": "x", "mode": "interval", "segments": []})
+
+    await llm.parse_workout_text("Every 3:00 x 5 Sets")
+
+    schema = captured["tools"][0]["input_schema"]["properties"]["interval_clock"]
+    assert schema["enum"] == ["count_down", "count_up"]
+
+
 async def test_workout_tool_offers_is_rest(monkeypatch: pytest.MonkeyPatch) -> None:
     captured = _patch_anthropic(monkeypatch, {"name": "x", "mode": "emom", "segments": []})
 
@@ -151,6 +187,11 @@ async def test_fixture_parses_to_expected_shape(fixture: dict[str, Any]) -> None
         assert workout.work_seconds == fixture["expected_work_seconds"]
     if "expected_rest_seconds" in fixture:
         assert workout.rest_seconds == fixture["expected_rest_seconds"]
+    if "expected_interval_clock" in fixture:
+        # Whether the clock counts the set down or up is what an athlete reads
+        # off the wall, so a workout scored by set times has to parse to the
+        # direction that shows them their own split.
+        assert workout.interval_clock.value == fixture["expected_interval_clock"]
     if "expected_min_segments" in fixture:
         assert len(workout.segments) >= fixture["expected_min_segments"]
     if "expected_rest_segments" in fixture:

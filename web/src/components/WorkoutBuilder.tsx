@@ -290,6 +290,28 @@ export function WorkoutBuilder({
           </div>
         )}
 
+        {showIntervalFields && (
+          <div className="field">
+            <label className="rest-toggle">
+              <input
+                type="checkbox"
+                checked={workout.interval_clock === "count_up"}
+                onChange={(e) =>
+                  setWorkout({
+                    ...workout,
+                    interval_clock: e.target.checked ? "count_up" : "count_down",
+                  })
+                }
+              />
+              Count each interval up
+            </label>
+            <span className="field-hint">
+              For sets scored by their finish time — the clock shows time into the set instead of
+              time left, so every athlete reads their own. The window and rest are unchanged.
+            </span>
+          </div>
+        )}
+
         <label className="field">
           <span className="field-label">
             Rep scheme <span className="optional">(optional)</span>

@@ -1,5 +1,14 @@
 export type WorkoutMode = "for_time" | "amrap" | "emom" | "tabata" | "interval" | "custom";
 
+/**
+ * Which way the clock runs *inside* one leg of an interval workout. Counting
+ * down suits an EMOM — the number is how long you have left. Counting up is
+ * for sets scored by their finish time ("Every 3:00 x 5 sets, score = slowest
+ * set"), where athletes finish at different moments and each needs to read
+ * their own split.
+ */
+export type IntervalClock = "count_down" | "count_up";
+
 export interface Movement {
   name?: string | null;
   reps?: number | null;
@@ -42,6 +51,8 @@ export interface Workout {
   work_seconds?: number | null;
   rest_seconds?: number | null;
   rep_scheme?: number[] | null;
+  /** Read for the interval modes only; for_time/amrap already count up. */
+  interval_clock?: IntervalClock | null;
   segments: WorkoutSegment[];
   created_at: string;
   updated_at: string;

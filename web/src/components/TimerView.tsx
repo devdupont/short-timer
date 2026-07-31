@@ -145,11 +145,24 @@ function ClockView({ workout }: { workout: Workout }) {
 
   const counting = state.status === "countdown";
   // During the lead-in the clock shows a bare seconds count, not mm:ss.
+  // Otherwise the big number is whichever reading the workout is run by: an
+  // up-counting leg (each athlete's own set time), the time left in a leg, or
+  // total elapsed for the single-effort modes.
   const bigNumber = counting
     ? String(Math.max(0, Math.ceil(state.countdownRemaining ?? 0)))
-    : state.remainingSeconds !== null
-      ? formatClock(state.remainingSeconds)
-      : formatClock(state.elapsedSeconds);
+    : state.legElapsedSeconds !== null
+      ? formatClock(state.legElapsedSeconds)
+      : state.remainingSeconds !== null
+        ? formatClock(state.remainingSeconds)
+        : formatClock(state.elapsedSeconds);
+
+  // A count-up set still runs inside a window, and the athlete who has already
+  // finished wants to know when the next one starts — so the countdown the big
+  // clock gave up stays on as a subtitle.
+  const windowRemaining =
+    state.legElapsedSeconds !== null && state.remainingSeconds !== null
+      ? state.remainingSeconds
+      : null;
 
   const roundPct = state.totalRounds
     ? (Math.min(state.round, state.totalRounds) / state.totalRounds) * 100
@@ -199,6 +212,10 @@ function ClockView({ workout }: { workout: Workout }) {
       >
         {bigNumber}
       </div>
+
+      {windowRemaining !== null && (
+        <p className="clock-subtitle">{formatClock(windowRemaining)} left in the set</p>
+      )}
 
       {state.currentMovement && <p className="current-movement">{state.currentMovement}</p>}
 
