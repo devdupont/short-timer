@@ -28,7 +28,7 @@ from short_timer.auth import DEFAULT_OWNER_ID
 from short_timer.config import get_settings
 from short_timer.db import get_workouts_collection
 from short_timer.llm import parse_workout_text
-from short_timer.models import Movement, Workout, WorkoutMode, WorkoutSegment
+from short_timer.models import IntervalClock, Movement, Workout, WorkoutMode, WorkoutSegment
 
 #: `MCPServer` is what the SDK's FastMCP became in mcp 2.0 — same decorator,
 #: same schema-from-type-hints. The tools below are unchanged by the move.
@@ -72,6 +72,7 @@ async def create_timer_workout(
     work_seconds: int | None = None,
     rest_seconds: int | None = None,
     rep_scheme: list[int] | None = None,
+    interval_clock: str = "count_down",
 ) -> dict[str, Any]:
     """Build and save a Workout directly from structured fields.
 
@@ -86,6 +87,10 @@ async def create_timer_workout(
     `is_rest` marks a leg that is itself the recovery — an EMOM minute that
     just says "Rest" — so the clock runs it as a rest period; give it no
     movements.
+
+    `interval_clock` is "count_down" (the default: time left in the leg) or
+    "count_up" for interval work scored by each set's finish time, where every
+    athlete needs to read their own split off the clock.
     """
     workout = Workout(
         name=name,
@@ -97,6 +102,7 @@ async def create_timer_workout(
         work_seconds=work_seconds,
         rest_seconds=rest_seconds,
         rep_scheme=rep_scheme,
+        interval_clock=IntervalClock(interval_clock),
         segments=[
             WorkoutSegment(
                 label=segment.get("label"),

@@ -27,7 +27,11 @@ with a 20-round partition sandwiched between two runs) and Fran (a flat
 `work_seconds`/`rest_seconds` (a "5/4/3/2/1 minutes" ladder is five legs of
 different lengths) or set `is_rest` to say the leg *is* the recovery — an
 EMOM whose "Minute 5: Rest" — so the clock runs it as a rest period instead
-of announcing a movement nobody performs. See `src/short_timer/models.py`.
+of announcing a movement nobody performs. `interval_clock` says which way the
+clock runs *inside* a leg: down by default (how long you have left to finish
+the minute), or up for sets scored by their finish time ("Every 3:00 x 5 sets,
+score = slowest set"), where athletes finish at different moments and each
+needs to read their own split. See `src/short_timer/models.py`.
 
 `web/src/timerPlan.ts` turns that shape into the plan the clock runs, and the
 visualizer (`WorkoutTimeline`) draws the same plan to scale — colour-coded by

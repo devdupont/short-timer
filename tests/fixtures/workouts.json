@@ -167,7 +167,8 @@
       "pull-up",
       "push-up",
       "air squat"
-    ]
+    ],
+    "expected_interval_clock": "count_down"
   },
   {
     "name": "Tabata This",
@@ -182,7 +183,8 @@
       "push-up",
       "sit-up",
       "air squat"
-    ]
+    ],
+    "expected_interval_clock": "count_down"
   },
   {
     "name": "Bike Sprints",
@@ -242,6 +244,20 @@
       "ghd sit-up",
       "wall walk",
       "renegade row"
+    ]
+  },
+  {
+    "name": "Every 3:00 x 5 Sets",
+    "category": "custom",
+    "source_text": "Every 3:00 x 5 Sets\n3 Rope Climbs (15 ft)\n12 Box Jump Overs (24/20 in)\n15 Toes to Bar\n\nScore = Slowest Set Time",
+    "expected_mode": "emom",
+    "expected_rounds": 5,
+    "expected_work_seconds": 180,
+    "expected_interval_clock": "count_up",
+    "expected_movements": [
+      "rope climb",
+      "box jump over",
+      "toes to bar"
     ]
   }
 ]

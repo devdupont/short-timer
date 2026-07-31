@@ -23,7 +23,9 @@ structured timer format. Read the workout text carefully and identify:
   - "for_time": complete the work as fast as possible, optionally against a \
 time cap. Includes classic chippers and "N rounds for time".
   - "amrap": as many rounds/reps as possible within a fixed time window.
-  - "emom": every minute (or every N seconds) on the minute, perform a task.
+  - "emom": every minute (or every N seconds) on the minute, perform a task. \
+"Every 3:00 x 5 sets" is this too — a fixed cadence the next set starts on, \
+where whatever time the work leaves over is the rest.
   - "tabata": fixed work/rest intervals repeated for a number of rounds \
 (classically 20s work / 10s rest x 8).
   - "interval": other fixed work/rest interval schemes that aren't tabata.
@@ -67,6 +69,16 @@ different length. Use the workout-level `rest_seconds` instead when recovery \
 follows *every* leg ("30 seconds on, 15 seconds off"); `is_rest` is for a leg \
 of the rotation that is nothing but rest.
 
+Set `interval_clock` to "count_up" when an interval workout is scored by how \
+long each set took — "Every 3:00 x 5 sets ... score = slowest set time", "each \
+round for time", "record your time for every set". Athletes each finish at a \
+different moment, so the clock has to show elapsed time within the set for \
+them to read their own; the window still runs its normal length and the rest \
+of the leg is still recovery. Leave it alone (counting down) for an ordinary \
+EMOM or tabata, where what matters is the time left to finish the work. Note \
+this is about *timed sets*, not about a scored workout in general: an AMRAP \
+scored by rounds, or a "record your reps" EMOM, still counts down.
+
 Always call `emit_workout` exactly once with your best-effort structured \
 reading of the workout. Do not invent movements or numbers that aren't \
 implied by the text. Some interval workouts (e.g. "30 seconds on, 15 \
@@ -103,6 +115,16 @@ _WORKOUT_TOOL: ToolParam = {
             "work_seconds": {"type": "integer"},
             "rest_seconds": {"type": "integer"},
             "rep_scheme": {"type": "array", "items": {"type": "integer"}},
+            "interval_clock": {
+                "type": "string",
+                "enum": ["count_down", "count_up"],
+                "description": (
+                    "Which way the clock runs inside one interval leg. Default "
+                    '"count_down" (time left to finish the minute). Use '
+                    '"count_up" when each set is scored by its finish time, so '
+                    "each athlete can read their own split off the clock."
+                ),
+            },
             "segments": {
                 "type": "array",
                 "items": {

@@ -2,6 +2,7 @@ import type { Workout } from "../types";
 import type { TimelineBar, TimelineBlock } from "../timerPlan";
 import {
   buildTimeline,
+  countsUp,
   formatClock,
   isIntervalMode,
   isRestSegment,
@@ -113,6 +114,10 @@ function summaryChips(workout: Workout): string[] {
       chips.push(`${timeline.bars.length} blocks`);
     }
     if (timeline.totalSeconds) chips.push(`${formatClock(timeline.totalSeconds)} total`);
+    // Direction is part of how the clock runs, and it's the one part the bars
+    // can't show — so it's said in words, where a wrong reading is as visible
+    // as a wrong leg length.
+    if (countsUp(workout)) chips.push("sets count up");
   } else if (workout.time_cap_seconds) {
     chips.push(
       `${workout.mode === "amrap" ? "window" : "cap"} ${formatClock(workout.time_cap_seconds)}`,

@@ -1,4 +1,10 @@
-from short_timer.models import Movement, Workout, WorkoutMode, WorkoutSegment
+from short_timer.models import (
+    IntervalClock,
+    Movement,
+    Workout,
+    WorkoutMode,
+    WorkoutSegment,
+)
 
 
 def test_workout_gets_a_generated_id() -> None:
@@ -90,3 +96,38 @@ def test_rest_leg_survives_round_trip() -> None:
 
     restored = Workout.model_validate(workout.model_dump(mode="json"))
     assert [s.is_rest for s in restored.segments] == [False, False, False, False, True]
+
+
+def test_the_clock_counts_down_unless_a_workout_says_otherwise() -> None:
+    """Every workout written before this existed keeps the clock it had."""
+    workout = Workout(name="Chelsea", mode=WorkoutMode.EMOM)
+    assert workout.interval_clock is IntervalClock.COUNT_DOWN
+    assert Workout.model_validate({"name": "Chelsea", "mode": "emom"}).interval_clock is (
+        IntervalClock.COUNT_DOWN
+    )
+
+
+def test_counting_up_survives_a_round_trip() -> None:
+    """Sets scored by finish time: the window is 3:00, the score is each split."""
+    workout = Workout(
+        name="Every 3:00 x 5 Sets",
+        mode=WorkoutMode.INTERVAL,
+        rounds=5,
+        work_seconds=180,
+        interval_clock=IntervalClock.COUNT_UP,
+        segments=[
+            WorkoutSegment(
+                movements=[
+                    Movement(name="Rope Climb", reps=3, notes="15 ft"),
+                    Movement(name="Box Jump Over", reps=12, load="24/20 in"),
+                    Movement(name="Toes to Bar", reps=15),
+                ]
+            )
+        ],
+    )
+
+    restored = Workout.model_validate(workout.model_dump(mode="json"))
+    assert restored.interval_clock is IntervalClock.COUNT_UP
+    # Direction is all that changes — the legs the clock runs are untouched.
+    assert restored.rounds == 5
+    assert restored.work_seconds == 180
