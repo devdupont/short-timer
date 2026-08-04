@@ -1,4 +1,4 @@
-import type { Me, UserConfigUpdate, WodEntry, Workout } from "./types";
+import type { Me, UserConfigUpdate, WodEntry, Workout, WorkoutPage, WorkoutQuery } from "./types";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
@@ -73,8 +73,22 @@ export function seedBenchmarks(): Promise<{ added: number; skipped: number }> {
   return request("/api/workouts/seed", { method: "POST" });
 }
 
-export function listWorkouts(): Promise<Workout[]> {
-  return request("/api/workouts");
+/** One page of the library. Search and filters run on the server, so a result
+ * reflects the whole library rather than only what's already been fetched. */
+export function listWorkouts(query: WorkoutQuery = {}): Promise<WorkoutPage> {
+  const params = new URLSearchParams();
+  if (query.q) params.set("q", query.q);
+  if (query.mode) params.set("mode", query.mode);
+  if (query.category) params.set("category", query.category);
+  if (query.limit !== undefined) params.set("limit", String(query.limit));
+  if (query.offset) params.set("offset", String(query.offset));
+  const qs = params.toString();
+  return request(`/api/workouts${qs ? `?${qs}` : ""}`);
+}
+
+/** Categories present in the library, for the filter dropdown. */
+export function listWorkoutCategories(): Promise<string[]> {
+  return request("/api/workouts/categories");
 }
 
 export function getWorkout(id: string): Promise<Workout> {

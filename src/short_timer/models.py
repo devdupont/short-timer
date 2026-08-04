@@ -31,6 +31,19 @@ class WorkoutMode(StrEnum):
     CUSTOM = "custom"
 
 
+#: Human-facing name for each mode, mirroring MODE_LABELS in the web client.
+#: The server needs them too: library search matches what a user types
+#: ("AMRAP") rather than the value that gets stored ("amrap").
+MODE_LABELS: dict[WorkoutMode, str] = {
+    WorkoutMode.FOR_TIME: "For Time",
+    WorkoutMode.AMRAP: "AMRAP",
+    WorkoutMode.EMOM: "EMOM",
+    WorkoutMode.TABATA: "Tabata",
+    WorkoutMode.INTERVAL: "Interval",
+    WorkoutMode.CUSTOM: "Custom",
+}
+
+
 class Movement(BaseModel):
     """A single exercise within a segment.
 
@@ -112,6 +125,17 @@ class SeedResponse(BaseModel):
 
     added: int
     skipped: int
+
+
+class WorkoutPage(BaseModel):
+    """One page of library results, with what a client needs to page through."""
+
+    items: list[Workout]
+    #: How many workouts match the *current filters*, not how many the library
+    #: holds — it's the page count of the view the user is actually looking at.
+    total: int
+    limit: int
+    offset: int
 
 
 class LoginRequest(BaseModel):

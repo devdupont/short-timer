@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from short_timer.config import get_settings
 from short_timer.db import (
     backfill_owner_ids,
+    backfill_search_text,
     backfill_source_hashes,
     ensure_indexes,
     get_database,
@@ -75,14 +76,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await ensure_default_user()
         hashes = await backfill_source_hashes()
         owners = await backfill_owner_ids()
+        indexed = await backfill_search_text()
         moved = await migrate_wod_parses()
         labelled = await backfill_parse_sources()
-        if hashes or owners or moved or labelled:
+        if hashes or owners or indexed or moved or labelled:
             logger.info(
-                "Backfilled source_hash on %d workout(s), owner_id on %d, moved %d "
-                "WOD parse(s) into the shared pool, labelled %d for retention.",
+                "Backfilled source_hash on %d workout(s), owner_id on %d, search_text "
+                "on %d, moved %d WOD parse(s) into the shared pool, labelled %d for "
+                "retention.",
                 hashes,
                 owners,
+                indexed,
                 moved,
                 labelled,
             )

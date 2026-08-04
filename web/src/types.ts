@@ -34,6 +34,24 @@ export interface Workout {
   updated_at: string;
 }
 
+/** One page of library results. `total` counts what matches the current
+ * filters, not the whole library, so it drives the page count of this view. */
+export interface WorkoutPage {
+  items: Workout[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/** The server-side query behind a library view. */
+export interface WorkoutQuery {
+  q?: string;
+  mode?: WorkoutMode | "";
+  category?: string;
+  limit?: number;
+  offset?: number;
+}
+
 export interface WodEntry {
   date: string;
   title: string;

@@ -9,6 +9,9 @@ Two groups of tools:
 - Library: `search_workouts` and `get_workout` read from the same MongoDB
   collection the web app writes to, so any MCP client can pull a saved or
   benchmark workout (Murph, Fran, ...) by name.
+
+Every tool here is scoped to one account, exactly like the web app's routes.
+See `_owner_id` for where that account comes from.
 """
 
 from __future__ import annotations
@@ -17,16 +20,44 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from short_timer.auth import DEFAULT_OWNER_ID
+from short_timer.config import get_settings
 from short_timer.db import get_workouts_collection
 from short_timer.llm import parse_workout_text
 from short_timer.models import Movement, Workout, WorkoutMode, WorkoutSegment
+from short_timer.search import library_query, search_text
 
 mcp = FastMCP("short-timer")
 
+#: Most workouts a search will return at once. A tool result is fed back to a
+#: model as tokens, so this is a context budget as much as a query limit.
+SEARCH_LIMIT = 25
 
-def _to_document(workout: Workout) -> dict[str, Any]:
+
+def _owner_id() -> str:
+    """The account these tools act as.
+
+    The single place tenancy is decided here, mirroring `current_owner` on the
+    web side. An MCP process has no session to carry a user id, so it comes
+    from configuration: one process serves one person.
+
+    Deliberately *not* a tool argument. A tool argument is chosen by the model
+    from whatever it has in context, which would make reading another user's
+    library a matter of guessing an id. Configuration can't be talked into a
+    different value. When real accounts land, this becomes the signed-in
+    account's id and no query below has to change.
+    """
+    return get_settings().mcp_owner_id or DEFAULT_OWNER_ID
+
+
+def _to_document(workout: Workout, owner_id: str) -> dict[str, Any]:
     doc = workout.model_dump(mode="json")
     doc["_id"] = doc.pop("id")
+    # Library search filters on this field, so a workout saved here without it
+    # would be missing from every search until the next startup backfill.
+    doc["search_text"] = search_text(workout)
+    # Ownership comes from configuration, never from a tool's arguments.
+    doc["owner_id"] = owner_id
     return doc
 
 
@@ -84,31 +115,29 @@ async def create_timer_workout(
         ],
     )
     collection = get_workouts_collection()
-    await collection.insert_one(_to_document(workout))
+    await collection.insert_one(_to_document(workout, _owner_id()))
     return workout.model_dump(mode="json")
 
 
 @mcp.tool()
 async def search_workouts(query: str = "", category: str | None = None) -> list[dict[str, Any]]:
-    """Search the saved workout library by name/description substring and/or category."""
-    mongo_query: dict[str, Any] = {}
-    if query:
-        mongo_query["$or"] = [
-            {"name": {"$regex": query, "$options": "i"}},
-            {"description": {"$regex": query, "$options": "i"}},
-        ]
-    if category:
-        mongo_query["category"] = category
+    """Search the saved workout library by workout name, movement, mode, or category.
 
+    Every word in `query` has to match. Matching is substring and
+    case-insensitive, and the text is taken literally — punctuation in a
+    workout name is not a pattern.
+    """
     collection = get_workouts_collection()
-    return [_from_document(doc) async for doc in collection.find(mongo_query).limit(25)]
+    cursor = collection.find(library_query(_owner_id(), q=query, category=category)).sort(
+        [("created_at", -1), ("_id", -1)]
+    )
+    return [_from_document(doc) async for doc in cursor.limit(SEARCH_LIMIT)]
 
 
 @mcp.tool()
 async def get_workout(workout_id: str) -> dict[str, Any] | None:
     """Fetch a single saved workout by id."""
-    collection = get_workouts_collection()
-    doc = await collection.find_one({"_id": workout_id})
+    doc = await get_workouts_collection().find_one({"_id": workout_id, "owner_id": _owner_id()})
     return _from_document(doc) if doc else None
 
 

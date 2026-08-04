@@ -15,6 +15,8 @@ from pymongo.asynchronous.database import AsyncDatabase
 from short_timer.auth import DEFAULT_OWNER_ID
 from short_timer.config import get_settings
 from short_timer.dedup import source_hash
+from short_timer.models import Workout
+from short_timer.search import search_text
 
 
 @lru_cache
@@ -55,6 +57,9 @@ async def ensure_indexes() -> None:
     # Dedup lookups are always scoped to an owner, so index the pair.
     await get_workouts_collection().create_index([("owner_id", 1), ("source_hash", 1)])
     await get_workouts_collection().create_index("owner_id")
+    # The library list is always one owner's rows, newest first — the sort has
+    # to come off the index or every page read sorts the whole library.
+    await get_workouts_collection().create_index([("owner_id", 1), ("created_at", -1)])
     await get_wod_cache_collection().create_index("date")
     # parse_cache is keyed by source hash as its _id, so lookups need no index.
     # The retention sweep filters on provenance and age, though.
@@ -78,6 +83,25 @@ async def backfill_source_hashes() -> int:
             continue
         await collection.update_one(
             {"_id": doc["_id"]}, {"$set": {"source_hash": source_hash(text)}}
+        )
+        updated += 1
+    return updated
+
+
+async def backfill_search_text() -> int:
+    """Populate `search_text` on workouts saved before library search existed.
+
+    Legacy rows would otherwise vanish from any filtered view: search matches
+    on a field they don't carry, so they'd silently miss every query — worse
+    than an empty result, because the workout is still in the library.
+    """
+    collection = get_workouts_collection()
+    updated = 0
+    async for doc in collection.find({"search_text": None}):
+        data = dict(doc)
+        data["id"] = data.pop("_id")  # documents key by _id; the model by id
+        await collection.update_one(
+            {"_id": doc["_id"]}, {"$set": {"search_text": search_text(Workout(**data))}}
         )
         updated += 1
     return updated

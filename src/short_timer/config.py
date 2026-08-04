@@ -36,6 +36,13 @@ class Settings(BaseSettings):
     mongodb_uri: str = "mongodb://localhost:27017"
     mongodb_db_name: str = "short_timer"
 
+    #: The account the MCP server reads and writes as. One MCP process is
+    #: launched by one person's client and has no session to carry a user id,
+    #: so its tenancy is a property of the process — this is the counterpart of
+    #: the web app's session cookie. Unset means the shared-passcode default
+    #: user, which is what every pre-accounts row was backfilled to.
+    mcp_owner_id: str | None = None
+
     # NoDecode stops pydantic-settings JSON-decoding this before our validator
     # runs. Without it, the obvious CORS_ORIGINS=https://shortimer.com raises a
     # SettingsError and the container fails to start.

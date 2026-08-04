@@ -1,6 +1,6 @@
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from short_timer.auth import current_owner, require_session
 from short_timer.benchmarks import benchmark_workouts
@@ -11,6 +11,8 @@ from short_timer.models import (
     SeedResponse,
     Workout,
     WorkoutCreateRequest,
+    WorkoutMode,
+    WorkoutPage,
     WorkoutParseRequest,
 )
 from short_timer.parse_cache import find_parse, remember_parse
@@ -21,10 +23,17 @@ from short_timer.ratelimit import (
     subject_for,
     writes_allowed,
 )
+from short_timer.search import library_query, search_text
 
 router = APIRouter(
     prefix="/api/workouts", tags=["workouts"], dependencies=[Depends(require_session)]
 )
+
+#: Page size when a client doesn't ask for one, and the most it may ask for.
+#: The cap is what keeps `limit` from being a way to pull the whole library
+#: back in one request, which is the thing pagination exists to prevent.
+DEFAULT_PAGE_SIZE = 20
+MAX_PAGE_SIZE = 100
 
 
 def _to_document(workout: Workout, owner_id: str) -> dict[str, Any]:
@@ -33,6 +42,9 @@ def _to_document(workout: Workout, owner_id: str) -> dict[str, Any]:
     # Derive the dedup hash from source_text at write time so it's always
     # consistent, regardless of how the model instance was constructed.
     doc["source_hash"] = source_hash(workout.source_text) if workout.source_text else None
+    # Likewise the search haystack: derived here so every write path — save,
+    # edit, seed, import — indexes the same way without having to remember to.
+    doc["search_text"] = search_text(workout)
     # Ownership comes from the session, never from the request body.
     doc["owner_id"] = owner_id
     return doc
@@ -150,11 +162,45 @@ async def create_workout(
     return body.workout
 
 
-@router.get("", response_model=list[Workout])
-async def list_workouts(owner_id: str = Depends(current_owner)) -> list[Workout]:
+@router.get("", response_model=WorkoutPage)
+async def list_workouts(
+    owner_id: str = Depends(current_owner),
+    q: str | None = Query(default=None, max_length=200),
+    mode: WorkoutMode | None = None,
+    category: str | None = Query(default=None, max_length=200),
+    limit: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+    offset: int = Query(default=0, ge=0),
+) -> WorkoutPage:
+    """One page of the owner's library, newest first.
+
+    Search and filters are applied here rather than in the client so that a
+    large library costs a page of documents per request instead of all of
+    them — and so that searching still sees workouts that aren't on screen.
+    """
     collection = get_workouts_collection()
-    cursor = collection.find({"owner_id": owner_id}).sort("created_at", -1)
-    return [_from_document(doc) async for doc in cursor]
+    query = library_query(owner_id, q=q, mode=mode, category=category)
+    total = await collection.count_documents(query)
+    # `_id` breaks ties: seeding writes a dozen rows in the same instant, and
+    # an unstable sort lets a workout slip between pages or appear on both.
+    cursor = (
+        collection.find(query).sort([("created_at", -1), ("_id", -1)]).skip(offset).limit(limit)
+    )
+    return WorkoutPage(
+        items=[_from_document(doc) async for doc in cursor],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/categories", response_model=list[str])
+async def list_categories(owner_id: str = Depends(current_owner)) -> list[str]:
+    """The categories actually present in this owner's library.
+
+    Declared ahead of `/{workout_id}` so the literal path wins the match.
+    """
+    values = await get_workouts_collection().distinct("category", {"owner_id": owner_id})
+    return sorted(str(v) for v in values if v)
 
 
 @router.get("/{workout_id}", response_model=Workout)

@@ -491,8 +491,29 @@ button {
   cursor: not-allowed;
 }
 
+.library-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+/* The panel-wide `select`/`input` rules above set width: 100%, which would
+   stack these three down the page. Two classes to outrank that, so the
+   search box takes the slack and the selects size to their content —
+   wrapping underneath only once the panel gets genuinely narrow. */
+.library-filters .library-search {
+  flex: 1 1 240px;
+  width: auto;
+}
+
+.library-filters .library-filter {
+  flex: 0 1 auto;
+  width: auto;
+  min-width: 140px;
+}
+
 .library-search {
-  width: 100%;
   box-sizing: border-box;
   font: inherit;
   padding: 10px 14px;
@@ -503,6 +524,21 @@ button {
 }
 
 .library-search:focus {
+  outline: none;
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+.library-filter {
+  font: inherit;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text-h);
+}
+
+.library-filter:focus {
   outline: none;
   border-color: var(--accent-border);
   box-shadow: 0 0 0 3px var(--accent-bg);
@@ -726,6 +762,25 @@ button {
   flex-direction: column;
   align-items: center;
   gap: 14px;
+}
+
+.library-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 4px;
+}
+
+.page-button {
+  padding: 8px 16px;
+  font-size: 14px;
+}
+
+.page-status {
+  color: var(--text);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
 }
 
 .library-footer {
