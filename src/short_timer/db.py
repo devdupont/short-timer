@@ -19,7 +19,12 @@ from short_timer.dedup import source_hash
 
 @lru_cache
 def get_client() -> AsyncMongoClient[dict[str, Any]]:
-    return AsyncMongoClient(get_settings().mongodb_uri)
+    settings = get_settings()
+    return AsyncMongoClient(
+        settings.mongodb_uri,
+        serverSelectionTimeoutMS=settings.mongodb_timeout_ms,
+        connectTimeoutMS=settings.mongodb_timeout_ms,
+    )
 
 
 def get_database() -> AsyncDatabase[dict[str, Any]]:

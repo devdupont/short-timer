@@ -1,4 +1,5 @@
 import re
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -220,8 +221,14 @@ async def create_workout(
         )
         if existing is not None:
             return _from_document(existing)
-    await collection.insert_one(_to_document(body.workout, owner_id))
-    return body.workout
+    # The id is server-assigned, like `owner_id`. Taking it from the body lets
+    # a caller name another owner's key: the insert fails on the duplicate
+    # `_id` rather than overwriting it, but that failure is itself an oracle
+    # for which ids exist, and it surfaces as "the database is unavailable" —
+    # a client-caused error that reads like an outage.
+    workout = body.workout.model_copy(update={"id": uuid.uuid4().hex})
+    await collection.insert_one(_to_document(workout, owner_id))
+    return workout
 
 
 @router.get("", response_model=WorkoutPage)

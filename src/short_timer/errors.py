@@ -5,14 +5,24 @@ a bare 500 with a stack trace in the logs and nothing useful for the caller —
 the UI just reports a generic failure and the user has no idea whether to
 retry. Each handler logs the real cause server-side and returns a short,
 non-leaky message.
+
+The catch-all is middleware rather than an `Exception` handler, which looks
+inconsistent but isn't. Starlette routes a handler registered for `Exception`
+itself to `ServerErrorMiddleware`, the outermost layer — outside CORS. The
+response it writes therefore carries no `Access-Control-Allow-Origin`, so a
+browser on a different origin than the API blocks it and reports a CORS
+failure; the message below never reaches the user. Every other handler here is
+fine, because they run in `ExceptionMiddleware`, which sits inside CORS. See
+`register_error_handlers` for the ordering this depends on.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 
 import anthropic
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request, Response, status
 from fastapi.responses import JSONResponse
 from pymongo.errors import PyMongoError
 
@@ -25,6 +35,14 @@ def _json(status_code: int, detail: str, retry_after: int | None = None) -> JSON
 
 
 def register_error_handlers(app: FastAPI) -> None:
+    """Install the handlers. Must be called *before* CORS is added.
+
+    `add_middleware` puts each new layer outermost, so the catch-all below has
+    to be registered first for CORS to end up wrapping it. Register it after
+    CORS and unhandled 500s go out without CORS headers again — the exact
+    failure the module docstring describes.
+    """
+
     @app.exception_handler(anthropic.APITimeoutError)
     async def _timeout(request: Request, exc: anthropic.APITimeoutError) -> JSONResponse:
         logger.warning("Anthropic request timed out: %s %s", request.method, request.url.path)
@@ -80,11 +98,18 @@ def register_error_handlers(app: FastAPI) -> None:
             retry_after=10,
         )
 
-    @app.exception_handler(Exception)
-    async def _unexpected(request: Request, exc: Exception) -> JSONResponse:
+    @app.middleware("http")
+    async def _unexpected(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
         # Last resort. Log everything, return nothing that describes internals.
-        logger.exception("Unhandled error on %s %s", request.method, request.url.path)
-        return _json(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "Something went wrong. Please try again.",
-        )
+        # `HTTPException` and every class handled above are already responses
+        # by the time they reach here, so this only ever sees a genuine bug.
+        try:
+            return await call_next(request)
+        except Exception:
+            logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+            return _json(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                "Something went wrong. Please try again.",
+            )

@@ -168,3 +168,62 @@ async def test_seeded_workout_model_still_round_trips() -> None:
     """Guard the tightened request model against over-restricting real data."""
     workout = Workout(name="Fran", mode=WorkoutMode.FOR_TIME, source_text="21-15-9")
     assert workout.source_text == "21-15-9"
+
+
+async def test_unexpected_errors_still_carry_cors_headers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A 500 the browser can't read is a 500 the user never sees.
+
+    The frontend and the API are separate origins in production, so a response
+    without `Access-Control-Allow-Origin` is blocked before any code can read
+    its body — the friendly message becomes an opaque network error. This is
+    what breaks if the catch-all is ever moved back to an `Exception` handler,
+    or registered after CORS in `app.py`.
+    """
+
+    async def boom(text: str, name_hint: str | None = None) -> Workout:
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr("short_timer.routers.workouts.parse_workout_text", boom)
+
+    origin = get_settings().cors_origins[0]
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as raw:
+        await raw.post("/api/auth/login", json={"passcode": "test-passcode"})
+        response = await raw.post(
+            "/api/workouts/parse",
+            json={"text": "Fran\n21-15-9"},
+            headers={"Origin": origin},
+        )
+
+    assert response.status_code == 500
+    assert response.headers.get("access-control-allow-origin") == origin
+
+
+async def test_create_ignores_a_client_supplied_id(authed_client: AsyncClient) -> None:
+    """Ids are server-assigned, so a caller can't name another owner's key.
+
+    Letting one through doesn't overwrite anything — the duplicate `_id` fails
+    the insert — but the failure tells the caller that id exists, and it is
+    reported as a database outage rather than a bad request.
+    """
+    payload = {
+        "workout": {
+            "id": "chosen-by-the-client",
+            "name": "Squatted",
+            "mode": "for_time",
+            "segments": [],
+        }
+    }
+    response = await authed_client.post("/api/workouts", json=payload)
+
+    assert response.status_code == 201
+    assert response.json()["id"] != "chosen-by-the-client"
+    # And the id the caller tried to claim is still free.
+    assert (await authed_client.get("/api/workouts/chosen-by-the-client")).status_code == 404
+
+
+async def test_database_client_fails_fast_rather_than_hanging() -> None:
+    """A slow failure is worse than a fast one when every request pays for it."""
+    assert get_settings().mongodb_timeout_ms <= 10_000

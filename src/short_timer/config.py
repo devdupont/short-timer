@@ -35,6 +35,13 @@ class Settings(BaseSettings):
 
     mongodb_uri: str = "mongodb://localhost:27017"
     mongodb_db_name: str = "short_timer"
+    #: How long a request waits for a reachable server before giving up.
+    #: PyMongo's default is 30 seconds, which turns a database blip into a
+    #: pile-up: every request holds a worker for half a minute before the
+    #: handler in `errors.py` can return its 503, and `/api/ready` — whose
+    #: whole job is to answer quickly — is the slowest of them. Failing in
+    #: seconds sheds load instead of absorbing it.
+    mongodb_timeout_ms: int = 5_000
 
     #: Whose library the MCP server reads and writes. It has no session to get
     #: this from — it's a local stdio tool, not an HTTP caller — so the owner is

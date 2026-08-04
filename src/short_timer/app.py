@@ -162,6 +162,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="short-timer", version="0.1.0", lifespan=lifespan)
 
 settings = get_settings()
+
+# Before CORS, deliberately: `add_middleware` puts the newest layer outermost,
+# so registering the error handlers first is what leaves CORS wrapping them.
+# Reverse these two and an unhandled 500 goes out with no CORS headers, which
+# a browser reports as a CORS failure rather than showing our message.
+register_error_handlers(app)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -169,8 +176,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-register_error_handlers(app)
 
 app.include_router(auth.router)
 app.include_router(me.router)
