@@ -7,8 +7,9 @@ README](../README.md) for the full setup (backend, MongoDB, env vars).
 npm install
 cp .env.example .env   # VITE_API_BASE_URL, defaults to http://localhost:8000
 npm run dev            # http://localhost:5173
-npm run build           # type-check + production bundle
-npm run lint            # oxlint
+npm run build          # type-check + production bundle
+npm run lint           # oxlint
+npm test               # vitest — unit tests for the timer plan
 ```
 
 ## Running on a phone

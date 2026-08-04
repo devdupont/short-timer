@@ -68,6 +68,12 @@ hatch run types        # mypy --strict over src/
 All four should pass before a change lands. `hatch fmt` still works but is
 deprecated in favour of the two `hatch check` commands above.
 
+CI runs the tests through `uv sync --frozen` instead, so it installs exactly
+what `uv.lock` pins — the same resolution the Docker image is built from. That
+means a dependency's new release can't turn `main` red on its own: it has to
+arrive as a lockfile change (`uv lock --upgrade-package <name>`) that someone
+reviewed. Hatch reads the same `[dependency-groups] dev`, so the two agree.
+
 The parser tests in `tests/test_llm_parser.py` include a `live` set,
 parametrized over `tests/fixtures/workouts.json`, that call the real
 Anthropic API and check the parsed output against each workout's expected

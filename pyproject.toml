@@ -42,9 +42,12 @@ short-timer-mcp = "short_timer.mcp_server:run"
 [tool.hatch.build.targets.wheel]
 packages = ["src/short_timer"]
 
-[tool.hatch.envs.default]
-installer = "uv"
-dependencies = [
+# Dev dependencies live here rather than in the hatch env so that uv locks
+# them: CI installs the locked set (`uv sync --frozen`), which is the only way
+# its test run covers the same versions the image ships. Hatch reads the same
+# group, so `hatch run test` locally and CI test the same thing.
+[dependency-groups]
+dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "mongomock-motor>=0.0.34",
@@ -52,6 +55,10 @@ dependencies = [
     "httpx>=0.28",
     "mypy>=1.13",
 ]
+
+[tool.hatch.envs.default]
+installer = "uv"
+dependency-groups = ["dev"]
 
 [tool.hatch.envs.default.scripts]
 test = "pytest {args:tests}"

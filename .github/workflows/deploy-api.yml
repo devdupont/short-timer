@@ -33,12 +33,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      # Reuse the same commands as local dev rather than a parallel setup that
-      # can drift. Tests need no external services: Mongo is mocked and the
-      # Anthropic client is never called.
-      - run: pipx install hatch
-      - run: hatch run test
-      - run: hatch run types
+      - uses: astral-sh/setup-uv@v5
+      # `--frozen` installs exactly what uv.lock pins — the same resolution the
+      # Dockerfile builds the image from, so this job tests what actually
+      # ships. It used to run through hatch, which resolves its env from
+      # pyproject on every run: a dependency's next major could turn this job
+      # red on a day nobody touched the repo, and mcp 2.0 duly did. A version
+      # change now has to arrive as a lockfile diff someone reviewed.
+      # No external services needed: Mongo is mocked and Anthropic is never called.
+      - run: uv sync --frozen
+      - run: uv run pytest tests
+      - run: uv run mypy src
 
   deploy:
     name: Build and deploy
