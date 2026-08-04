@@ -498,6 +498,13 @@ button {
   cursor: not-allowed;
 }
 
+.library-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
 .library-search {
   width: 100%;
   box-sizing: border-box;
@@ -509,7 +516,32 @@ button {
   color: var(--text-h);
 }
 
-.library-search:focus {
+.library-filter {
+  font: inherit;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text-h);
+}
+
+/* The panel-wide input/select rules set width: 100%, which would stack these
+   three down the page. Two classes to outrank that, so the search box takes
+   the slack and the selects size to their content — wrapping underneath only
+   once the panel is genuinely narrow. */
+.library-filters .library-search {
+  flex: 1 1 240px;
+  width: auto;
+}
+
+.library-filters .library-filter {
+  flex: 0 1 auto;
+  width: auto;
+  min-width: 140px;
+}
+
+.library-search:focus,
+.library-filter:focus {
   outline: none;
   border-color: var(--accent-border);
   box-shadow: 0 0 0 3px var(--accent-bg);

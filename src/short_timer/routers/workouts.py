@@ -77,13 +77,24 @@ def _term_clause(term: str) -> dict[str, Any]:
     return {"$or": clauses}
 
 
-def _library_filter(owner_id: str, query: str | None) -> dict[str, Any]:
-    """Build the Mongo filter for one owner's library, narrowed by `query`.
+def _library_filter(
+    owner_id: str,
+    query: str | None,
+    mode: WorkoutMode | None = None,
+    category: str | None = None,
+) -> dict[str, Any]:
+    """Build the Mongo filter for one owner's library, narrowed by the view.
 
     Terms are AND-ed: "amrap cindy" means both, in any field, matching how the
-    search box behaved when it filtered an already-loaded list.
+    search box behaved when it filtered an already-loaded list. `mode` and
+    `category` narrow further and are exact — a dropdown picks a value that
+    exists, so there's nothing to fuzzy-match.
     """
     mongo_filter: dict[str, Any] = {"owner_id": owner_id}
+    if mode is not None:
+        mongo_filter["mode"] = mode.value
+    if category:
+        mongo_filter["category"] = category
     terms = (query or "").lower().split()
     if terms:
         mongo_filter["$and"] = [_term_clause(term) for term in terms]
@@ -218,20 +229,40 @@ async def list_workouts(
     limit: int = Query(_DEFAULT_LIMIT, ge=1, le=_MAX_LIMIT),
     offset: int = Query(0, ge=0),
     q: str | None = Query(None, max_length=200),
+    mode: WorkoutMode | None = None,
+    category: str | None = Query(None, max_length=200),
     owner_id: str = Depends(current_owner),
 ) -> WorkoutPage:
-    """One page of the owner's library, newest first, optionally filtered by `q`.
+    """One page of the owner's library, newest first, narrowed by the filters.
 
     Searching server-side rather than in the browser is what keeps paging
     honest: a filter applied to the current page alone would hide matches
     sitting on page three.
     """
     collection = get_workouts_collection()
-    mongo_filter = _library_filter(owner_id, q)
+    mongo_filter = _library_filter(owner_id, q, mode, category)
     total = await collection.count_documents(mongo_filter)
-    cursor = collection.find(mongo_filter).sort("created_at", -1).skip(offset).limit(limit)
+    # `_id` breaks ties. Paging the same sort twice has to agree on the order,
+    # and `created_at` alone doesn't guarantee that when rows share a timestamp
+    # — seeding writes the benchmark set in one tight loop.
+    cursor = (
+        collection.find(mongo_filter)
+        .sort([("created_at", -1), ("_id", -1)])
+        .skip(offset)
+        .limit(limit)
+    )
     items = [_from_document(doc) async for doc in cursor]
     return WorkoutPage(items=items, total=total, limit=limit, offset=offset)
+
+
+@router.get("/categories", response_model=list[str])
+async def list_categories(owner_id: str = Depends(current_owner)) -> list[str]:
+    """The categories present in this owner's library, for the filter dropdown.
+
+    Declared ahead of `/{workout_id}` so the literal path wins the match.
+    """
+    values = await get_workouts_collection().distinct("category", {"owner_id": owner_id})
+    return sorted(str(value) for value in values if value)
 
 
 @router.get("/{workout_id}", response_model=Workout)

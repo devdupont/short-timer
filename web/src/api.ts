@@ -6,6 +6,7 @@ import type {
   UserConfigUpdate,
   WodEntry,
   Workout,
+  WorkoutMode,
   WorkoutPage,
 } from "./types";
 
@@ -108,13 +109,22 @@ export function listWorkouts(params?: {
   limit?: number;
   offset?: number;
   q?: string;
+  mode?: WorkoutMode | "";
+  category?: string;
 }): Promise<WorkoutPage> {
   const search = new URLSearchParams();
   if (params?.limit !== undefined) search.set("limit", String(params.limit));
   if (params?.offset) search.set("offset", String(params.offset));
   if (params?.q) search.set("q", params.q);
+  if (params?.mode) search.set("mode", params.mode);
+  if (params?.category) search.set("category", params.category);
   const query = search.toString();
   return request(`/api/workouts${query ? `?${query}` : ""}`);
+}
+
+/** Categories present in the library, for the filter dropdown. */
+export function listWorkoutCategories(): Promise<string[]> {
+  return request("/api/workouts/categories");
 }
 
 export function getWorkout(id: string): Promise<Workout> {

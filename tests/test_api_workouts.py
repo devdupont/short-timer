@@ -437,3 +437,67 @@ async def test_search_treats_the_query_literally(authed_client: AsyncClient) -> 
 
     unmatched = await authed_client.get("/api/workouts", params={"q": ".*"})
     assert unmatched.json()["total"] == 0
+
+
+async def test_filters_narrow_by_mode_and_category(authed_client: AsyncClient) -> None:
+    await _save(authed_client, _dated("Fran", 1, category="benchmark"))
+    await _save(authed_client, _dated("Grace", 2, category="girls"))
+    await _save(authed_client, _dated("Cindy", 3, category="girls", mode=WorkoutMode.AMRAP))
+
+    async def names(**params: str) -> list[str]:
+        response = await authed_client.get("/api/workouts", params=params)
+        assert response.status_code == 200
+        return [w["name"] for w in response.json()["items"]]
+
+    assert await names(mode="amrap") == ["Cindy"]
+    assert await names(category="girls") == ["Cindy", "Grace"]
+    # Filters combine with each other and with the search box.
+    assert await names(mode="for_time", category="girls") == ["Grace"]
+    assert await names(category="girls", q="cindy") == ["Cindy"]
+    assert await names(category="girls", q="fran") == []
+
+
+async def test_filters_narrow_the_total_not_just_the_page(authed_client: AsyncClient) -> None:
+    """`total` drives the client's page count, so it has to follow the filters."""
+    for day in range(1, 6):
+        await _save(authed_client, _dated(f"Filler {day}", day, category="benchmark"))
+    await _save(authed_client, _dated("Cindy", 6, category="girls"))
+
+    filtered = await authed_client.get("/api/workouts", params={"category": "girls", "limit": 2})
+    assert filtered.json()["total"] == 1
+
+
+async def test_list_rejects_an_unknown_mode(authed_client: AsyncClient) -> None:
+    response = await authed_client.get("/api/workouts", params={"mode": "nonsense"})
+    assert response.status_code == 422
+
+
+async def test_categories_lists_this_owners_categories_only(authed_client: AsyncClient) -> None:
+    from short_timer.db import get_workouts_collection
+
+    await _save(authed_client, _dated("Fran", 1, category="benchmark"))
+    await _save(authed_client, _dated("Grace", 2, category="girls"))
+    await _save(authed_client, _dated("Homemade", 3))  # no category
+    await get_workouts_collection().insert_one(
+        {
+            "_id": "theirs",
+            "owner_id": "another-user",
+            "name": "Theirs",
+            "mode": "for_time",
+            "segments": [],
+            "category": "hero",
+            "created_at": "2026-07-19T00:00:00Z",
+            "updated_at": "2026-07-19T00:00:00Z",
+        }
+    )
+
+    response = await authed_client.get("/api/workouts/categories")
+    assert response.status_code == 200
+    assert response.json() == ["benchmark", "girls"]  # sorted, no blanks, no "hero"
+
+
+async def test_categories_path_is_not_read_as_a_workout_id(authed_client: AsyncClient) -> None:
+    """`/categories` has to win the match against `/{workout_id}`."""
+    response = await authed_client.get("/api/workouts/categories")
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
