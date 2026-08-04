@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
-import { ApiError, deleteWorkout, listWorkouts, seedBenchmarks } from "../api";
-import type { Workout } from "../types";
+import {
+  ApiError,
+  deleteWorkout,
+  listWorkoutCategories,
+  listWorkouts,
+  seedBenchmarks,
+} from "../api";
+import type { Workout, WorkoutMode } from "../types";
 import { MODE_LABELS } from "../types";
 
 /** Rows per page. The server caps what it will hand back at 100. */
@@ -22,6 +28,9 @@ export function WorkoutLibrary({
   const [query, setQuery] = useState("");
   // What's actually been sent to the server — `query` lags behind it while typing.
   const [search, setSearch] = useState("");
+  const [mode, setMode] = useState<WorkoutMode | "">("");
+  const [category, setCategory] = useState("");
+  const [categories, setCategories] = useState<string[]>([]);
   // Whether the library holds anything at all, which only an unfiltered count
   // can answer: zero results for a search says nothing about an empty library.
   const [hasAny, setHasAny] = useState(false);
@@ -29,6 +38,9 @@ export function WorkoutLibrary({
   const [notice, setNotice] = useState<string | null>(null);
   // Bumped to re-fetch the current page in place, after a delete or a seed.
   const [reloadKey, setReloadKey] = useState(0);
+
+  // Whether the view is narrowed at all, by any of the three controls.
+  const filtering = Boolean(search || mode || category);
 
   // Searching is a round trip now, so wait for a pause in typing rather than
   // firing a request per keystroke.
@@ -45,12 +57,14 @@ export function WorkoutLibrary({
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    listWorkouts({ limit: PAGE_SIZE, offset, q: search })
+    listWorkouts({ limit: PAGE_SIZE, offset, q: search, mode, category })
       .then((page) => {
         if (cancelled) return;
         setWorkouts(page.items);
         setTotal(page.total);
-        if (!search) setHasAny(page.total > 0);
+        // Only an unnarrowed count answers "is the library empty" — a filter
+        // returning nothing says nothing about what's saved.
+        if (!filtering) setHasAny(page.total > 0);
         // Deleting the last row of the last page leaves the offset past the
         // end; step back rather than showing an empty page with a Prev button.
         if (page.items.length === 0 && offset > 0) {
@@ -63,7 +77,26 @@ export function WorkoutLibrary({
     return () => {
       cancelled = true;
     };
-  }, [refreshKey, reloadKey, search, offset]);
+  }, [refreshKey, reloadKey, search, offset, mode, category, filtering]);
+
+  // Kept in step with the library, so a category stops being offered once the
+  // last workout using it is deleted.
+  useEffect(() => {
+    listWorkoutCategories().then(setCategories);
+  }, [refreshKey, reloadKey]);
+
+  // Each filter resets the page in the same update that applies it. A
+  // follow-up effect would fetch twice — once at the old offset, which renders
+  // an empty page, then again at 0.
+  function changeMode(next: WorkoutMode | "") {
+    setMode(next);
+    setOffset(0);
+  }
+
+  function changeCategory(next: string) {
+    setCategory(next);
+    setOffset(0);
+  }
 
   async function handleDelete(id: string) {
     await deleteWorkout(id);
@@ -77,8 +110,12 @@ export function WorkoutLibrary({
     setNotice(null);
     try {
       const { added, skipped } = await seedBenchmarks();
+      // Clear the whole view, not just the search — landing on a filtered page
+      // that hides what was just added reads as the seed having done nothing.
       setQuery("");
       setSearch("");
+      setMode("");
+      setCategory("");
       setOffset(0);
       setReloadKey((key) => key + 1);
       setNotice(
@@ -104,7 +141,7 @@ export function WorkoutLibrary({
     ? "Loading…"
     : !hasAny
       ? "Nothing saved yet."
-      : search
+      : filtering
         ? `${total} matching workout${total === 1 ? "" : "s"}.`
         : `${total} saved workout${total === 1 ? "" : "s"}. Select one to load it into the timer.`;
 
@@ -116,14 +153,44 @@ export function WorkoutLibrary({
       </div>
 
       {hasAny && (
-        <input
-          className="library-search"
-          type="search"
-          placeholder="Search by name, movement, mode, or category…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          aria-label="Search workouts"
-        />
+        <div className="library-filters">
+          <input
+            className="library-search"
+            type="search"
+            placeholder="Search by name, movement, mode, or category…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            aria-label="Search workouts"
+          />
+          <select
+            className="library-filter"
+            value={mode}
+            onChange={(e) => changeMode(e.target.value as WorkoutMode | "")}
+            aria-label="Filter by mode"
+          >
+            <option value="">All modes</option>
+            {Object.entries(MODE_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+          {categories.length > 0 && (
+            <select
+              className="library-filter"
+              value={category}
+              onChange={(e) => changeCategory(e.target.value)}
+              aria-label="Filter by category"
+            >
+              <option value="">All categories</option>
+              {categories.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
       )}
 
       {notice && <p className="section-sub">{notice}</p>}
@@ -139,7 +206,9 @@ export function WorkoutLibrary({
       )}
 
       {!loading && hasAny && total === 0 && (
-        <div className="empty-state">No workouts match “{query}”.</div>
+        <div className="empty-state">
+          {query ? <>No workouts match “{query}”.</> : "No workouts match these filters."}
+        </div>
       )}
 
       {workouts.length > 0 && (
