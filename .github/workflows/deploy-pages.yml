@@ -40,6 +40,11 @@ jobs:
 
       - run: npm run lint
 
+      # `timerPlan.ts` is the one reading of a workout that both the clock and
+      # the visualizer run on, so a regression there is wrong in two places at
+      # once and visible in neither until a workout is running.
+      - run: npm test
+
       # Vite inlines env vars at build time, so this is baked into the bundle
       # (it's a public URL, not a secret). Set it as a repository *variable*
       # named VITE_API_BASE_URL, e.g. https://api.shortimer.com — until then
