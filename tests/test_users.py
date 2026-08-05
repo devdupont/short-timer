@@ -7,7 +7,7 @@ from short_timer.auth import DEFAULT_OWNER_ID, create_session_token, session_use
 from short_timer.config import get_settings
 from short_timer.crypto import decrypt, generate_key
 from short_timer.db import get_users_collection, get_workouts_collection
-from short_timer.models import Workout, WorkoutMode
+from short_timer.models import GymProvider, Workout, WorkoutMode
 from short_timer.users import ensure_default_user, get_user
 
 
@@ -86,7 +86,8 @@ async def test_reseeding_does_not_clobber_existing_config(authed_client: AsyncCl
     await ensure_default_user()
     user = await get_user(DEFAULT_OWNER_ID)
     assert user is not None
-    assert user.config.wodify_member.whiteboard_key is not None
+    connection = user.config.connection(GymProvider.WODIFY_MEMBER)
+    assert connection is not None and connection.credential is not None
 
 
 async def test_existing_workouts_survive_the_session_change(authed_client: AsyncClient) -> None:
@@ -152,13 +153,15 @@ async def test_credential_is_encrypted_at_rest(authed_client: AsyncClient) -> No
 
     raw = await get_users_collection().find_one({"_id": DEFAULT_OWNER_ID})
     assert raw is not None
-    stored = raw["config"]["wodify_owner"]["api_key"]
-    assert secret not in str(stored)
+    # Written through the deprecated `wodify_owner` alias above, but stored as
+    # a provider connection — so this also covers the alias still working.
+    assert secret not in str(raw["config"])
     # …and the server can still read it back.
     user = await get_user(DEFAULT_OWNER_ID)
     assert user is not None
-    assert user.config.wodify_owner.api_key is not None
-    assert decrypt(user.config.wodify_owner.api_key) == secret
+    connection = user.config.connection(GymProvider.WODIFY_OWNER)
+    assert connection is not None and connection.credential is not None
+    assert decrypt(connection.credential) == secret
 
 
 async def test_omitted_credential_is_left_alone(authed_client: AsyncClient) -> None:

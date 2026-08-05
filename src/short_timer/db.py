@@ -5,6 +5,7 @@ support (`pymongo.AsyncMongoClient`, 4.9+); this talks to Mongo directly
 through that instead.
 """
 
+import logging
 from functools import lru_cache
 from typing import Any
 
@@ -15,6 +16,8 @@ from pymongo.asynchronous.database import AsyncDatabase
 from short_timer.auth import DEFAULT_OWNER_ID
 from short_timer.config import get_settings
 from short_timer.dedup import source_hash
+
+logger = logging.getLogger(__name__)
 
 
 @lru_cache
@@ -55,9 +58,15 @@ def get_parse_cache_collection() -> AsyncCollection[dict[str, Any]]:
     return get_database()["parse_cache"]
 
 
-def get_wodify_cache_collection() -> AsyncCollection[dict[str, Any]]:
-    """Cached Wodify workouts, keyed by gym fingerprint + date (see wodify_cache)."""
-    return get_database()["wodify_cache"]
+def get_gym_cache_collection() -> AsyncCollection[dict[str, Any]]:
+    """Cached gym workouts, keyed by gym fingerprint + date (see gym_cache).
+
+    Renamed from `wodify_cache` when gyms stopped being Wodify-only. Nothing
+    migrates the old collection: it holds only derived data with a 12-hour
+    refresh interval, so the first request for a gym repopulates it and the
+    stale collection can simply be dropped.
+    """
+    return get_database()["gym_cache"]
 
 
 def get_users_collection() -> AsyncCollection[dict[str, Any]]:
@@ -82,7 +91,7 @@ async def ensure_indexes() -> None:
     await get_wod_cache_collection().create_index("date")
     await get_concept2_cache_collection().create_index("date")
     # The gym feed always reads one gym's recent days, so index the pair.
-    await get_wodify_cache_collection().create_index([("gym", 1), ("date", -1)])
+    await get_gym_cache_collection().create_index([("gym", 1), ("date", -1)])
     # parse_cache is keyed by source hash as its _id, so lookups need no index.
     # The retention sweep filters on provenance and age, though.
     await get_parse_cache_collection().create_index([("source", 1), ("created_at", 1)])
@@ -108,6 +117,48 @@ async def backfill_source_hashes() -> int:
         )
         updated += 1
     return updated
+
+
+async def backfill_gym_connections() -> int:
+    """Persist the legacy-Wodify-config migration `UserConfig` does on read.
+
+    `UserConfig._fold_legacy_gyms` already moves `wodify_owner`/`wodify_member`
+    into `gyms` every time a user is loaded, so correctness does not depend on
+    this running — it exists so the *stored* documents converge on one shape
+    instead of being re-migrated forever, and so the legacy fields can
+    eventually be deleted from the model without a data question attached.
+
+    Idempotent, and safe to run against documents already migrated: a user whose
+    config round-trips unchanged is skipped.
+    """
+    from short_timer.models import User
+
+    collection = get_users_collection()
+    migrated = 0
+    async for doc in collection.find({}):
+        config = (doc.get("config") or {}) if isinstance(doc.get("config"), dict) else {}
+        # Only a *credential* sitting in a legacy slot is worth a write. The
+        # legacy keys themselves survive every dump as all-None objects, so
+        # testing for their presence would re-migrate every user on every boot.
+        owner = config.get("wodify_owner") or {}
+        member = config.get("wodify_member") or {}
+        if not owner.get("api_key") and not member.get("whiteboard_key"):
+            continue
+        data = dict(doc)
+        data["id"] = data.pop("_id")
+        try:
+            user = User(**data)
+        except Exception:  # a malformed user shouldn't stop the sweep
+            logger.exception("Skipping unreadable user document during gym-config migration.")
+            continue
+        await collection.update_one(
+            {"_id": user.id}, {"$set": {"config": user.config.model_dump(mode="json")}}
+        )
+        migrated += 1
+
+    if migrated:
+        logger.info("Migrated gym config on %d user(s) into provider connections.", migrated)
+    return migrated
 
 
 async def backfill_owner_ids() -> int:

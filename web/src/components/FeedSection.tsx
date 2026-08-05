@@ -45,9 +45,11 @@ export function FeedCard({
             </button>
           </>
         )}
-        <a className="wod-link" href={entry.url} target="_blank" rel="noreferrer">
-          {spec.linkLabel}
-        </a>
+        {entry.url && (
+          <a className="wod-link" href={entry.url} target="_blank" rel="noreferrer">
+            {entry.link_label || spec.linkLabel}
+          </a>
+        )}
       </div>
     </section>
   );

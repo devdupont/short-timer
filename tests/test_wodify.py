@@ -12,13 +12,14 @@ import httpx
 import pytest
 import respx
 
+from short_timer.gym_cache import gym_fingerprint
 from short_timer.html_text import extract_text
+from short_timer.models import GymProvider
 from short_timer.wodify import (
     fetch_member_wod,
     fetch_owner_wod,
     fetch_recent_member_wods,
 )
-from short_timer.wodify_cache import gym_fingerprint
 
 PROGRAM_API = "https://api.wodify.com/v1/workouts/formattedworkout"
 WHITEBOARD = "https://app.wodify.com/Performance/PublicWhiteboard.aspx"
@@ -199,21 +200,25 @@ async def test_owner_empty_workout_is_skipped(client: httpx.AsyncClient) -> None
 
 
 def test_different_gyms_never_share_a_cache_key() -> None:
-    assert gym_fingerprint("gym-a-key", "member") != gym_fingerprint("gym-b-key", "member")
+    assert gym_fingerprint("gym-a-key", GymProvider.WODIFY_MEMBER) != gym_fingerprint(
+        "gym-b-key", GymProvider.WODIFY_MEMBER
+    )
 
 
 def test_same_gym_shares_a_cache_key() -> None:
     """Two members of one gym should hit the same entries."""
-    assert gym_fingerprint("shared-key", "member") == gym_fingerprint("shared-key", "member")
+    assert gym_fingerprint("shared-key", GymProvider.WODIFY_MEMBER) == gym_fingerprint(
+        "shared-key", GymProvider.WODIFY_MEMBER
+    )
 
 
 def test_routes_do_not_collide() -> None:
     """The two routes format the same workout differently; don't conflate them."""
-    assert gym_fingerprint("same-credential", "member") != gym_fingerprint(
-        "same-credential", "owner"
+    assert gym_fingerprint("same-credential", GymProvider.WODIFY_MEMBER) != gym_fingerprint(
+        "same-credential", GymProvider.WODIFY_OWNER
     )
 
 
 def test_fingerprint_does_not_leak_the_credential() -> None:
     secret = "super-secret-whiteboard-key"
-    assert secret not in gym_fingerprint(secret, "member")
+    assert secret not in gym_fingerprint(secret, GymProvider.WODIFY_MEMBER)

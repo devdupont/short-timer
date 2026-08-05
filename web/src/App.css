@@ -721,6 +721,37 @@ button {
   line-height: 1.2;
 }
 
+/* --- Gym sources -------------------------------------------------------- */
+/* Two routes onto one platform (a member key and an owner key for the same
+   Wodify) are one decision, so they're grouped under a single heading rather
+   than reading as two unrelated integrations. */
+
+.platform-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.platform-heading {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+/* The status line carries the only signal that separates a wrong credential
+   from a gym that simply didn't post, so it sits above the fields rather than
+   below the save button. */
+.connection-status {
+  margin: 0 0 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--social-bg);
+  font-size: 14px;
+}
+
 .error {
   color: #e5484d;
 }

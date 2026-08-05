@@ -11,7 +11,7 @@ understand one schema.
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, Field, model_validator
@@ -258,6 +258,89 @@ class WodifyMemberConfig(BaseModel):
         return bool(self.enabled and self.whiteboard_key)
 
 
+# --- Gym providers -----------------------------------------------------------
+# A gym's programming lives on whichever platform the gym pays for, reached by
+# a route that differs by whether you run the gym or attend it. Those two axes
+# multiply, so each *combination* is a provider rather than trying to model
+# platform and role separately — "the SugarWOD owner route" is the unit that
+# has a URL, a credential and a response shape.
+
+
+class GymProvider(StrEnum):
+    """One way of reaching one gym platform.
+
+    Closed on purpose, like `FeedKind`: these are the routes the server knows
+    how to fetch, not free-form user input. `gym_providers.py` holds the
+    human-facing metadata and the fetch dispatch for each member here.
+    """
+
+    WODIFY_MEMBER = "wodify_member"
+    WODIFY_OWNER = "wodify_owner"
+    SUGARWOD_OWNER = "sugarwod_owner"
+
+
+#: Which provider is tried first when a user has configured more than one.
+#: Member routes outrank owner routes: someone who is both an admin and an
+#: athlete sees the same gym either way, and a public whiteboard costs no API
+#: quota. Beyond that it's the order providers shipped in, which is arbitrary
+#: but stable — and a user who wants a different answer switches the other
+#: connection off.
+PROVIDER_PRIORITY: tuple[GymProvider, ...] = (
+    GymProvider.WODIFY_MEMBER,
+    GymProvider.WODIFY_OWNER,
+    GymProvider.SUGARWOD_OWNER,
+)
+
+
+class GymConnection(BaseModel):
+    """One stored gym credential, plus the settings that qualify it.
+
+    `location` and `program` are deliberately generic rather than named per
+    platform: Wodify calls them location and program, SugarWOD calls the second
+    one a track, and inventing a field per platform would put the registry's
+    job (labelling) into the storage schema. What each one *means* is declared
+    in `gym_providers.py` and rendered from there.
+    """
+
+    provider: GymProvider
+    credential: SecretBox | None = None
+    location: str | None = Field(default=None, max_length=200)
+    program: str | None = Field(default=None, max_length=200)
+    enabled: bool = False
+
+    def is_usable(self) -> bool:
+        """Whether this is complete enough to fetch with.
+
+        Only the credential is required here. Whether a provider *also* needs
+        a location or program is a property of that provider, so the check
+        lives with it — see `GymProviderSpec.is_usable`.
+        """
+        return bool(self.enabled and self.credential)
+
+
+class GymWod(BaseModel):
+    """One day's workout from a gym, whichever platform it came from.
+
+    Mirrors `crossfit.Wod` rather than reusing it: the two intakes share a
+    shape today but not a lifecycle — crossfit.com has rest days and a public
+    permalink per day, a gym has neither — and coupling them would mean every
+    change to one route rippling into the other.
+
+    Lives here rather than beside a client because every provider produces
+    one; `provider` records which did, so a card can say "View on SugarWOD"
+    without the frontend having to infer it from the URL.
+    """
+
+    date: date
+    title: str
+    text: str
+    #: A "see it at the source" pointer, or empty when the platform has no
+    #: page we can link a member to without leaking their credential. The UI
+    #: drops the link rather than rendering a dead one.
+    url: str = ""
+    provider: GymProvider
+
+
 class FeedKind(StrEnum):
     """A source of workouts the home page can show.
 
@@ -335,9 +418,68 @@ def normalize_feeds(feeds: list[FeedPref]) -> list[FeedPref]:
 class UserConfig(BaseModel):
     """Everything a user configures about their own account."""
 
+    #: Pre-provider storage, kept so a document written before `gyms` existed
+    #: still validates. Folded into `gyms` by the validator below and cleared,
+    #: so nothing downstream reads these — they exist to be migrated from.
     wodify_owner: WodifyOwnerConfig = Field(default_factory=WodifyOwnerConfig)
     wodify_member: WodifyMemberConfig = Field(default_factory=WodifyMemberConfig)
+    gyms: list[GymConnection] = Field(default_factory=list)
     feeds: list[FeedPref] = Field(default_factory=default_feeds)
+
+    @model_validator(mode="after")
+    def _fold_legacy_gyms(self) -> UserConfig:
+        """Move pre-provider Wodify config into `gyms`, once, on read.
+
+        Migrating in the model rather than in a startup sweep means there is
+        no window where some read paths see the old shape and some the new,
+        and no ordering dependency on the sweep having run. The sweep in
+        `db.backfill_gym_connections` still exists, but only to *persist* what
+        this already computes — correctness doesn't depend on it.
+
+        Idempotent: a provider already present in `gyms` wins, so a user who
+        has since edited their connection doesn't get the stale legacy copy
+        written back over it.
+        """
+        configured = {connection.provider for connection in self.gyms}
+        legacy: list[tuple[GymProvider, SecretBox | None, str | None, str | None, bool]] = [
+            (
+                GymProvider.WODIFY_MEMBER,
+                self.wodify_member.whiteboard_key,
+                self.wodify_member.location,
+                self.wodify_member.program,
+                self.wodify_member.enabled,
+            ),
+            (
+                GymProvider.WODIFY_OWNER,
+                self.wodify_owner.api_key,
+                self.wodify_owner.location,
+                self.wodify_owner.program,
+                self.wodify_owner.enabled,
+            ),
+        ]
+        for provider, credential, location, program, enabled in legacy:
+            # Nothing stored means nothing to migrate — don't manufacture an
+            # empty connection for a route the user never touched.
+            if provider in configured or credential is None:
+                continue
+            self.gyms.append(
+                GymConnection(
+                    provider=provider,
+                    credential=credential,
+                    location=location,
+                    program=program,
+                    enabled=enabled,
+                )
+            )
+
+        # Cleared so there is exactly one place a connection can live. The next
+        # write persists the migration; until then it happens on every read.
+        self.wodify_owner = WodifyOwnerConfig()
+        self.wodify_member = WodifyMemberConfig()
+        return self
+
+    def connection(self, provider: GymProvider) -> GymConnection | None:
+        return next((c for c in self.gyms if c.provider == provider), None)
 
 
 class User(BaseModel):
@@ -370,6 +512,16 @@ class WodifyMemberConfigView(BaseModel):
     enabled: bool = False
 
 
+class GymConnectionView(BaseModel):
+    """One stored connection, with its credential reduced to set/not-set."""
+
+    provider: GymProvider
+    credential: SecretStatus = Field(default_factory=SecretStatus)
+    location: str | None = None
+    program: str | None = None
+    enabled: bool = False
+
+
 class UserConfigView(BaseModel):
     """Config as the client sees it — credentials reduced to set/not-set.
 
@@ -377,9 +529,14 @@ class UserConfigView(BaseModel):
     getting a parallel view model that would only ever copy fields across.
     """
 
+    gyms: list[GymConnectionView] = Field(default_factory=list)
+    feeds: list[FeedPref] = Field(default_factory=default_feeds)
+    #: Deprecated, and populated only from the two Wodify entries in `gyms`.
+    #: A browser holding a page loaded before providers shipped still reads
+    #: these, and a config screen that explodes on deploy is a worse bug than
+    #: two fields nobody new should use. Remove once no client reads them.
     wodify_owner: WodifyOwnerConfigView = Field(default_factory=WodifyOwnerConfigView)
     wodify_member: WodifyMemberConfigView = Field(default_factory=WodifyMemberConfigView)
-    feeds: list[FeedPref] = Field(default_factory=default_feeds)
 
 
 class MeResponse(BaseModel):
@@ -412,7 +569,30 @@ class WodifyMemberConfigUpdate(BaseModel):
     enabled: bool | None = None
 
 
+class GymConnectionUpdate(BaseModel):
+    """A requested change to one gym connection.
+
+    `credential` follows the same three-way rule the Wodify updates did:
+    absent leaves the stored value alone (so the UI can fix a typo'd location
+    without re-entering the key), empty string clears it, a value replaces it.
+    """
+
+    credential: str | None = Field(default=None, max_length=500)
+    location: str | None = Field(default=None, max_length=200)
+    program: str | None = Field(default=None, max_length=200)
+    enabled: bool | None = None
+
+
 class UserConfigUpdate(BaseModel):
+    #: Keyed by provider rather than a list, because a list would face the
+    #: same unmergeable-position problem `feeds` has — and unlike feeds, order
+    #: here isn't user-facing, so there's nothing to be gained by paying it.
+    #: Only the providers named are touched; the rest are left alone.
+    gyms: dict[GymProvider, GymConnectionUpdate] | None = None
+    #: Deprecated aliases for the two Wodify providers, kept for the same
+    #: reason as their counterparts on `UserConfigView`: a stale browser tab
+    #: shouldn't get a 422 when it saves. Applied before `gyms`, so a request
+    #: that somehow sends both has the current field win.
     wodify_owner: WodifyOwnerConfigUpdate | None = None
     wodify_member: WodifyMemberConfigUpdate | None = None
     #: Replaced wholesale rather than merged, because position *is* the display

@@ -1,7 +1,15 @@
 import { useEffect, useState } from "react";
-import { ApiError, getMe, updateConfig } from "../api";
+import { ApiError, getGymHealth, getMe, listGymProviders, updateConfig } from "../api";
 import { FEED_SPECS } from "../feeds";
-import type { FeedPref, Me, UserConfigUpdate } from "../types";
+import type {
+  FeedPref,
+  GymConnection,
+  GymConnectionHealth,
+  GymProvider,
+  GymProviderInfo,
+  Me,
+  UserConfigUpdate,
+} from "../types";
 
 /** Feed order is sent as a whole list, so both edits below return a new one. */
 function setEnabled(feeds: FeedPref[], index: number, enabled: boolean): FeedPref[] {
@@ -21,101 +29,233 @@ function move(feeds: FeedPref[], index: number, delta: number): FeedPref[] {
  * starts empty and an empty input means "leave the stored one alone" — the
  * browser only ever holds a credential the user just typed.
  */
-type Draft = {
-  ownerKey: string;
-  ownerLocation: string;
-  ownerProgram: string;
-  ownerEnabled: boolean;
-  memberKey: string;
-  memberLocation: string;
-  memberProgram: string;
-  memberEnabled: boolean;
-};
+interface ConnectionDraft {
+  credential: string;
+  location: string;
+  program: string;
+  enabled: boolean;
+}
 
-function draftFrom(me: Me): Draft {
+type Drafts = Partial<Record<GymProvider, ConnectionDraft>>;
+
+function draftFor(connection: GymConnection | undefined): ConnectionDraft {
   return {
-    ownerKey: "",
-    ownerLocation: me.config.wodify_owner.location ?? "",
-    ownerProgram: me.config.wodify_owner.program ?? "",
-    ownerEnabled: me.config.wodify_owner.enabled,
-    memberKey: "",
-    memberLocation: me.config.wodify_member.location ?? "",
-    memberProgram: me.config.wodify_member.program ?? "",
-    memberEnabled: me.config.wodify_member.enabled,
+    credential: "",
+    location: connection?.location ?? "",
+    program: connection?.program ?? "",
+    enabled: connection?.enabled ?? false,
   };
 }
 
-function CredentialField({
-  label,
-  hint,
-  stored,
-  value,
-  disabled,
-  onChange,
+function draftsFrom(me: Me, providers: GymProviderInfo[]): Drafts {
+  const drafts: Drafts = {};
+  for (const info of providers) {
+    drafts[info.provider] = draftFor(me.config.gyms.find((g) => g.provider === info.provider));
+  }
+  return drafts;
+}
+
+function since(iso: string): string {
+  const minutes = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (minutes < 2) return "just now";
+  if (minutes < 60) return `${minutes} minutes ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  return `${Math.round(hours / 24)} days ago`;
+}
+
+/**
+ * The one line that distinguishes "your key is wrong" from "your gym is quiet".
+ *
+ * Fetchers deliberately swallow their errors so a single bad day can't empty a
+ * feed, which leaves those two cases looking identical from the outside. A
+ * connection that is switched on and has *never* fetched is the actionable one.
+ */
+function ConnectionStatus({
+  connection,
+  health,
+  active,
+}: {
+  connection: GymConnection | undefined;
+  health: GymConnectionHealth | undefined;
+  active: boolean;
+}) {
+  if (!connection?.credential.is_set) {
+    return <span className="field-hint">Not connected.</span>;
+  }
+  if (!connection.enabled) {
+    return <span className="field-hint">Saved, but switched off — nothing is fetched.</span>;
+  }
+  if (!health?.last_fetched_at) {
+    return (
+      <span className="error">
+        Switched on, but this gym has never fetched successfully. Check the key and any required
+        fields below.
+      </span>
+    );
+  }
+  return (
+    <span className="field-hint">
+      {active ? "Feeding your home page. " : "Ready, but another connection is in use. "}
+      Last fetched {since(health.last_fetched_at)} · {health.cached_days} day
+      {health.cached_days === 1 ? "" : "s"} cached.
+    </span>
+  );
+}
+
+function ProviderCard({
+  info,
+  connection,
+  health,
+  draft,
+  active,
+  saving,
+  secretsOff,
+  onPatch,
+  onSave,
   onClear,
 }: {
-  label: string;
-  hint: string;
-  stored: { is_set: boolean; masked?: string | null };
-  value: string;
-  disabled: boolean;
-  onChange: (next: string) => void;
+  info: GymProviderInfo;
+  connection: GymConnection | undefined;
+  health: GymConnectionHealth | undefined;
+  draft: ConnectionDraft;
+  active: boolean;
+  saving: boolean;
+  secretsOff: boolean;
+  onPatch: (changes: Partial<ConnectionDraft>) => void;
+  onSave: () => void;
   onClear: () => void;
 }) {
+  const stored = connection?.credential;
   return (
-    <label className="field">
-      <span className="field-label">
-        {label}
-        {stored.is_set && <span className="category-badge">Saved {stored.masked}</span>}
-      </span>
-      <input
-        type="password"
-        autoComplete="off"
-        value={value}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={stored.is_set ? "Leave blank to keep the saved key" : "Not set"}
-      />
-      <span className="field-hint">
-        {hint}
-        {stored.is_set && (
-          <>
-            {" "}
-            <button type="button" className="text-remove" onClick={onClear}>
-              Remove saved key
-            </button>
-          </>
-        )}
-      </span>
-    </label>
+    <section className="form-card">
+      <div className="builder-section-head">
+        <h3>{info.label}</h3>
+        <p className="section-sub">{info.blurb}</p>
+      </div>
+
+      <p className="connection-status">
+        <ConnectionStatus connection={connection} health={health} active={active} />
+      </p>
+
+      <label className="field">
+        <span className="field-label">
+          {info.credential_label}
+          {stored?.is_set && <span className="category-badge">Saved {stored.masked}</span>}
+        </span>
+        <input
+          type="password"
+          autoComplete="off"
+          value={draft.credential}
+          disabled={secretsOff}
+          onChange={(e) => onPatch({ credential: e.target.value })}
+          placeholder={stored?.is_set ? "Leave blank to keep the saved key" : "Not set"}
+        />
+        <span className="field-hint">
+          {info.credential_hint}
+          {stored?.is_set && (
+            <>
+              {" "}
+              <button type="button" className="text-remove" onClick={onClear}>
+                Remove saved key
+              </button>
+            </>
+          )}
+        </span>
+      </label>
+
+      {(info.location || info.program) && (
+        <div className="field-grid">
+          {info.location && (
+            <label className="field">
+              <span className="field-label">
+                {info.location.label}{" "}
+                {!info.location.required && <span className="optional">optional</span>}
+              </span>
+              <input
+                value={draft.location}
+                placeholder={info.location.placeholder}
+                onChange={(e) => onPatch({ location: e.target.value })}
+              />
+            </label>
+          )}
+          {info.program && (
+            <label className="field">
+              <span className="field-label">
+                {info.program.label}{" "}
+                {!info.program.required && <span className="optional">optional</span>}
+              </span>
+              <input
+                value={draft.program}
+                placeholder={info.program.placeholder}
+                onChange={(e) => onPatch({ program: e.target.value })}
+              />
+            </label>
+          )}
+        </div>
+      )}
+
+      <label className="field checkbox-field">
+        <input
+          type="checkbox"
+          checked={draft.enabled}
+          onChange={(e) => onPatch({ enabled: e.target.checked })}
+        />
+        {/* Selects which credential fetches the gym, not whether the feed is on
+            the home page — that's the "Home page feeds" list above. */}
+        <span className="field-label">Use this connection</span>
+      </label>
+
+      <p className="field-hint">{info.help_text}</p>
+
+      <button type="button" className="primary-button" disabled={saving} onClick={onSave}>
+        {saving ? "Saving…" : "Save"}
+      </button>
+    </section>
   );
 }
 
 export function Settings() {
   const [me, setMe] = useState<Me | null>(null);
-  const [draft, setDraft] = useState<Draft | null>(null);
+  const [providers, setProviders] = useState<GymProviderInfo[]>([]);
+  const [health, setHealth] = useState<GymConnectionHealth[]>([]);
+  const [drafts, setDrafts] = useState<Drafts>({});
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    getMe()
-      .then((loaded) => {
+
+    async function load() {
+      try {
+        // Health is best-effort: it only enriches the status line, so a
+        // failure there shouldn't stop someone from editing their settings.
+        const [loaded, offered] = await Promise.all([getMe(), listGymProviders()]);
         if (cancelled) return;
         setMe(loaded);
-        setDraft(draftFrom(loaded));
-      })
-      .catch((err) =>
-        setError(err instanceof ApiError ? err.message : "Could not reach the server."),
-      );
+        setProviders(offered);
+        setDrafts(draftsFrom(loaded, offered));
+        const reported = await getGymHealth().catch(() => []);
+        if (!cancelled) setHealth(reported);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof ApiError ? err.message : "Could not reach the server.");
+        }
+      }
+    }
+
+    void load();
     return () => {
       cancelled = true;
     };
   }, []);
 
-  function patch(changes: Partial<Draft>) {
-    setDraft((current) => (current ? { ...current, ...changes } : current));
+  function patch(provider: GymProvider, changes: Partial<ConnectionDraft>) {
+    setDrafts((current) => {
+      const existing = current[provider];
+      return existing ? { ...current, [provider]: { ...existing, ...changes } } : current;
+    });
     setStatus(null);
   }
 
@@ -128,7 +268,8 @@ export function Settings() {
       setMe(next);
       // Re-seed from the server so cleared credentials and trimmed values are
       // reflected, and the key inputs go back to empty.
-      setDraft(draftFrom(next));
+      setDrafts(draftsFrom(next, providers));
+      setHealth(await getGymHealth().catch(() => health));
       setStatus(message);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not reach the server.");
@@ -138,9 +279,25 @@ export function Settings() {
   }
 
   if (error && !me) return <p className="error">{error}</p>;
-  if (!me || !draft) return <p className="empty-state">Loading…</p>;
+  if (!me) return <p className="empty-state">Loading…</p>;
 
   const secretsOff = !me.secrets_available;
+  const connectionFor = (provider: GymProvider) =>
+    me.config.gyms.find((g) => g.provider === provider);
+
+  // Only one connection actually feeds the home page. Providers arrive in the
+  // server's own priority order, so the first usable one is the answer — and
+  // saying so beats letting someone wonder why their second gym is ignored.
+  const activeProvider = providers.find((info) => {
+    const connection = connectionFor(info.provider);
+    if (!connection?.credential.is_set || !connection.enabled) return false;
+    if (info.location?.required && !connection.location) return false;
+    if (info.program?.required && !connection.program) return false;
+    return true;
+  })?.provider;
+
+  // Grouped so two routes onto the same platform read as one choice.
+  const platforms = [...new Set(providers.map((info) => info.platform))];
 
   return (
     <div className="settings">
@@ -209,152 +366,54 @@ export function Settings() {
         </ul>
       </section>
 
-      <section className="form-card">
-        <div className="builder-section-head">
-          <h3>My gym’s whiteboard</h3>
-          <p className="section-sub">
-            For gym members. Works only if your gym has turned on Wodify’s public whiteboard —
-            the key comes from the URL they publish.
-          </p>
+      {platforms.map((platform) => (
+        <div key={platform} className="platform-group">
+          <div className="builder-section-head">
+            <h3 className="platform-heading">{platform}</h3>
+          </div>
+          {providers
+            .filter((info) => info.platform === platform)
+            .map((info) => {
+              const draft = drafts[info.provider];
+              if (!draft) return null;
+              return (
+                <ProviderCard
+                  key={info.provider}
+                  info={info}
+                  connection={connectionFor(info.provider)}
+                  health={health.find((h) => h.provider === info.provider)}
+                  draft={draft}
+                  active={activeProvider === info.provider}
+                  saving={saving}
+                  secretsOff={secretsOff}
+                  onPatch={(changes) => patch(info.provider, changes)}
+                  onClear={() =>
+                    save(
+                      { gyms: { [info.provider]: { credential: "" } } },
+                      `${info.credential_label} removed.`,
+                    )
+                  }
+                  onSave={() =>
+                    save(
+                      {
+                        gyms: {
+                          [info.provider]: {
+                            // Omitted when blank, so the stored key survives.
+                            ...(draft.credential ? { credential: draft.credential } : {}),
+                            ...(info.location ? { location: draft.location } : {}),
+                            ...(info.program ? { program: draft.program } : {}),
+                            enabled: draft.enabled,
+                          },
+                        },
+                      },
+                      `${info.label} saved.`,
+                    )
+                  }
+                />
+              );
+            })}
         </div>
-
-        <CredentialField
-          label="Whiteboard key"
-          hint="The WhiteboardKey value from your gym’s public whiteboard link."
-          stored={me.config.wodify_member.whiteboard_key}
-          value={draft.memberKey}
-          disabled={secretsOff}
-          onChange={(memberKey) => patch({ memberKey })}
-          onClear={() => save({ wodify_member: { whiteboard_key: "" } }, "Whiteboard key removed.")}
-        />
-
-        <div className="field-grid">
-          <label className="field">
-            <span className="field-label">
-              Location <span className="optional">optional</span>
-            </span>
-            <input
-              value={draft.memberLocation}
-              onChange={(e) => patch({ memberLocation: e.target.value })}
-              placeholder="e.g. Main"
-            />
-          </label>
-          <label className="field">
-            <span className="field-label">
-              Program <span className="optional">optional</span>
-            </span>
-            <input
-              value={draft.memberProgram}
-              onChange={(e) => patch({ memberProgram: e.target.value })}
-              placeholder="e.g. CrossFit"
-            />
-          </label>
-        </div>
-
-        <label className="field checkbox-field">
-          <input
-            type="checkbox"
-            checked={draft.memberEnabled}
-            onChange={(e) => patch({ memberEnabled: e.target.checked })}
-          />
-          {/* Selects which credential fetches the gym, not whether the feed is
-              on the home page — that's the "Home page feeds" list above. */}
-          <span className="field-label">Use this connection</span>
-        </label>
-
-        <button
-          type="button"
-          className="primary-button"
-          disabled={saving}
-          onClick={() =>
-            save(
-              {
-                wodify_member: {
-                  // Omitted when blank, so the stored key survives this save.
-                  ...(draft.memberKey ? { whiteboard_key: draft.memberKey } : {}),
-                  location: draft.memberLocation,
-                  program: draft.memberProgram,
-                  enabled: draft.memberEnabled,
-                },
-              },
-              "Whiteboard settings saved.",
-            )
-          }
-        >
-          {saving ? "Saving…" : "Save"}
-        </button>
-      </section>
-
-      <section className="form-card">
-        <div className="builder-section-head">
-          <h3>Gym owner API key</h3>
-          <p className="section-sub">
-            For gym owners and admins. Generate a key in Wodify under Automations →
-            Integrations → API Keys. Location and program must match your Wodify setup exactly.
-          </p>
-        </div>
-
-        <CredentialField
-          label="API key"
-          hint="Sent to Wodify as the x-api-key header. Stored encrypted."
-          stored={me.config.wodify_owner.api_key}
-          value={draft.ownerKey}
-          disabled={secretsOff}
-          onChange={(ownerKey) => patch({ ownerKey })}
-          onClear={() => save({ wodify_owner: { api_key: "" } }, "API key removed.")}
-        />
-
-        <div className="field-grid">
-          <label className="field">
-            <span className="field-label">Location</span>
-            <input
-              value={draft.ownerLocation}
-              onChange={(e) => patch({ ownerLocation: e.target.value })}
-              placeholder="Exact location name in Wodify"
-            />
-          </label>
-          <label className="field">
-            <span className="field-label">Program</span>
-            <input
-              value={draft.ownerProgram}
-              onChange={(e) => patch({ ownerProgram: e.target.value })}
-              placeholder="Exact program name in Wodify"
-            />
-          </label>
-        </div>
-
-        <label className="field checkbox-field">
-          <input
-            type="checkbox"
-            checked={draft.ownerEnabled}
-            onChange={(e) => patch({ ownerEnabled: e.target.checked })}
-          />
-          {/* Selects which credential fetches the gym, not whether the feed is
-              on the home page — that's the "Home page feeds" list above. */}
-          <span className="field-label">Use this connection</span>
-        </label>
-
-        <button
-          type="button"
-          className="primary-button"
-          disabled={saving}
-          onClick={() =>
-            save(
-              {
-                wodify_owner: {
-                  ...(draft.ownerKey ? { api_key: draft.ownerKey } : {}),
-                  location: draft.ownerLocation,
-                  program: draft.ownerProgram,
-                  enabled: draft.ownerEnabled,
-                },
-              },
-              "API settings saved.",
-            )
-          }
-        >
-          {saving ? "Saving…" : "Save"}
-        </button>
-      </section>
+      ))}
 
       {error && <p className="error">{error}</p>}
       {status && <p className="field-hint">{status}</p>}

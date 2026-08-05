@@ -1,6 +1,8 @@
 import type {
   Concept2WodEntry,
+  GymConnectionHealth,
   GymFeed,
+  GymProviderInfo,
   HybridWodEntry,
   Me,
   UserConfigUpdate,
@@ -81,6 +83,21 @@ export function listWods(days?: number): Promise<WodEntry[]> {
 /** Recent workouts from the user's own gym, if they've connected one. */
 export function listGymWods(days?: number): Promise<GymFeed> {
   return request(`/api/gym/wods${days ? `?days=${days}` : ""}`);
+}
+
+/**
+ * Every gym platform this server can connect to, and how to label its fields.
+ *
+ * Settings renders from this rather than from a hardcoded form per platform,
+ * so a new integration reaches the UI without a frontend change.
+ */
+export function listGymProviders(): Promise<GymProviderInfo[]> {
+  return request("/api/gym/providers");
+}
+
+/** Whether each stored connection has ever successfully fetched. */
+export function getGymHealth(): Promise<GymConnectionHealth[]> {
+  return request("/api/gym/health");
 }
 
 /** Recent daily erg workouts from Concept2 (RowErg, SkiErg and BikeErg). */

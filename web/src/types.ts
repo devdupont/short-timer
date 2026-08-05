@@ -74,8 +74,9 @@ export interface WodEntry {
   saved_workout_id?: string | null;
 }
 
-/** One day's workout from the user's configured gym. Same shape as WodEntry. */
+/** One day's workout from the user's configured gym. */
 export interface GymWodEntry {
+  provider: GymProvider;
   date: string;
   title: string;
   text: string;
@@ -108,18 +109,57 @@ export interface SecretStatus {
   masked?: string | null;
 }
 
-export interface WodifyOwnerConfig {
-  api_key: SecretStatus;
+/** One way of reaching one gym platform. Mirrors the server's `GymProvider`. */
+export type GymProvider = "wodify_member" | "wodify_owner" | "sugarwod_owner";
+
+/** How to render one of a provider's two generic text fields. */
+export interface GymFieldInfo {
+  label: string;
+  placeholder: string;
+  required: boolean;
+}
+
+/**
+ * A connectable gym platform, as the server describes it.
+ *
+ * Settings renders entirely from these, so adding a platform is a server-only
+ * change — which is the whole point of asking for them rather than hardcoding
+ * a form per provider. `location` and `program` are null when that provider
+ * doesn't use the field.
+ */
+export interface GymProviderInfo {
+  provider: GymProvider;
+  platform: string;
+  label: string;
+  blurb: string;
+  link_label: string;
+  credential_label: string;
+  credential_hint: string;
+  help_text: string;
+  location?: GymFieldInfo | null;
+  program?: GymFieldInfo | null;
+}
+
+/** A stored gym connection. The credential is never sent back, only described. */
+export interface GymConnection {
+  provider: GymProvider;
+  credential: SecretStatus;
   location?: string | null;
   program?: string | null;
   enabled: boolean;
 }
 
-export interface WodifyMemberConfig {
-  whiteboard_key: SecretStatus;
-  location?: string | null;
-  program?: string | null;
-  enabled: boolean;
+/**
+ * Whether a connection is actually working.
+ *
+ * Fetchers swallow their errors so one bad day can't empty a feed, which means
+ * a wrong credential and a gym that simply didn't post look identical from the
+ * outside. `last_fetched_at: null` is the only thing that tells them apart.
+ */
+export interface GymConnectionHealth {
+  provider: GymProvider;
+  last_fetched_at?: string | null;
+  cached_days: number;
 }
 
 /** One day of the Hybrid Calisthenics rotation. Same shape as WodEntry. */
@@ -145,8 +185,7 @@ export interface FeedPref {
 }
 
 export interface UserConfig {
-  wodify_owner: WodifyOwnerConfig;
-  wodify_member: WodifyMemberConfig;
+  gyms: GymConnection[];
   feeds: FeedPref[];
 }
 
@@ -163,15 +202,17 @@ export interface Me {
  * it alone" — which is how a credential survives an edit to the fields around
  * it without the browser ever holding the secret. An empty string clears it.
  */
-export interface WodifyConfigUpdate {
+export interface GymConnectionUpdate {
+  /** Omitted keeps the stored key; "" clears it; a value replaces it. */
+  credential?: string;
   location?: string | null;
   program?: string | null;
   enabled?: boolean;
 }
 
 export interface UserConfigUpdate {
-  wodify_owner?: WodifyConfigUpdate & { api_key?: string };
-  wodify_member?: WodifyConfigUpdate & { whiteboard_key?: string };
+  /** Keyed by provider; only the providers named are touched. */
+  gyms?: Partial<Record<GymProvider, GymConnectionUpdate>>;
   /** Replaced wholesale, not merged — position is the display order. */
   feeds?: FeedPref[];
 }

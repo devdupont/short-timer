@@ -10,28 +10,29 @@ from fastapi.responses import JSONResponse
 from short_timer import concept2_cache, hybrid_cache
 from short_timer.config import get_settings
 from short_timer.db import (
+    backfill_gym_connections,
     backfill_owner_ids,
     backfill_source_hashes,
     ensure_indexes,
     get_database,
 )
 from short_timer.errors import register_error_handlers
+from short_timer.gym_cache import (
+    REFRESH_INTERVAL_SECONDS as GYM_REFRESH_INTERVAL_SECONDS,
+)
+from short_timer.gym_cache import refresh_all_configured
 from short_timer.parse_cache import (
     backfill_parse_sources,
     migrate_wod_parses,
     prune_expired_parses,
 )
-from short_timer.routers import auth, concept2, hybrid, me, wodify, wods, workouts
+from short_timer.routers import auth, concept2, gym, hybrid, me, wods, workouts
 from short_timer.users import ensure_default_user
 from short_timer.wod_cache import (
     REFRESH_INTERVAL_SECONDS,
     ensure_wods_parsed,
     refresh_wod_cache,
 )
-from short_timer.wodify_cache import (
-    REFRESH_INTERVAL_SECONDS as WODIFY_REFRESH_INTERVAL_SECONDS,
-)
-from short_timer.wodify_cache import refresh_all_configured
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +86,7 @@ async def _refresh_hybrid_daily() -> None:
 
 
 async def _refresh_gyms_periodically() -> None:
-    """Keep each configured gym's workouts warm, so no request waits on Wodify.
+    """Keep each configured gym's workouts warm, so no request waits on a platform.
 
     More often than the crossfit.com refresh: a gym may post the day's workout
     at any hour, and there's no single publish time to anchor to.
@@ -96,8 +97,8 @@ async def _refresh_gyms_periodically() -> None:
         except asyncio.CancelledError:
             raise
         except Exception:  # never let a bad fetch kill the loop
-            logger.exception("Wodify refresh failed; will retry next cycle.")
-        await asyncio.sleep(WODIFY_REFRESH_INTERVAL_SECONDS)
+            logger.exception("Gym refresh failed; will retry next cycle.")
+        await asyncio.sleep(GYM_REFRESH_INTERVAL_SECONDS)
 
 
 #: User-submitted parses age out; sweep for them monthly. The loop runs once
@@ -130,14 +131,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         owners = await backfill_owner_ids()
         moved = await migrate_wod_parses()
         labelled = await backfill_parse_sources()
-        if hashes or owners or moved or labelled:
+        gyms = await backfill_gym_connections()
+        if hashes or owners or moved or labelled or gyms:
             logger.info(
                 "Backfilled source_hash on %d workout(s), owner_id on %d, moved %d "
-                "WOD parse(s) into the shared pool, labelled %d for retention.",
+                "WOD parse(s) into the shared pool, labelled %d for retention, "
+                "migrated gym config on %d user(s).",
                 hashes,
                 owners,
                 moved,
                 labelled,
+                gyms,
             )
     except Exception:  # startup maintenance is non-critical
         logger.exception("Skipped startup database maintenance.")
@@ -183,7 +187,7 @@ app.include_router(workouts.router)
 app.include_router(wods.router)
 app.include_router(concept2.router)
 app.include_router(hybrid.router)
-app.include_router(wodify.router)
+app.include_router(gym.router)
 
 
 @app.get("/api/health")
