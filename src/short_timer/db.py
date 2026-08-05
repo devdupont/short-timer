@@ -97,6 +97,15 @@ def get_email_tokens_collection() -> AsyncCollection[dict[str, Any]]:
     return get_database()["email_tokens"]
 
 
+def get_api_tokens_collection() -> AsyncCollection[dict[str, Any]]:
+    """Long-lived per-user tokens for clients with no session (see api_tokens).
+
+    Same split as invites: `_id` is a public id the owner can revoke by, and
+    the token itself is stored hashed alongside it.
+    """
+    return get_database()["api_tokens"]
+
+
 def get_rate_limit_collection() -> AsyncCollection[dict[str, Any]]:
     """Rate-limit counters, one document per (scope, subject, window)."""
     return get_database()["rate_limits"]
@@ -164,6 +173,10 @@ async def ensure_indexes() -> None:
     # Invites are *not* swept — a redeemed or expired one is worth keeping so
     # an admin can see that it was used, and by whom.
     await get_email_tokens_collection().create_index("expires_at", expireAfterSeconds=0)
+    # Every authenticated MCP call looks a token up by hash, and the settings
+    # screen lists one user's tokens.
+    await get_api_tokens_collection().create_index("token_hash", unique=True)
+    await get_api_tokens_collection().create_index("user_id")
     # One account per address. Sparse, because the shared-passcode account has
     # no email and two documents with a missing field would otherwise collide
     # on a plain unique index.

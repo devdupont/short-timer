@@ -2,11 +2,14 @@ import { useEffect, useState } from "react";
 import {
   ApiError,
   changePassword,
+  createApiToken,
   endOtherSessions,
+  listApiTokens,
   listSessions,
   resendVerification,
+  revokeApiToken,
 } from "../api";
-import type { Me, SessionView } from "../types";
+import type { ApiToken, ApiTokenScope, Me, SessionView } from "../types";
 
 function errorText(err: unknown): string {
   return err instanceof ApiError ? err.message : "Could not reach the server.";
@@ -152,6 +155,151 @@ export function Account({ me }: { me: Me }) {
 
       {error && <p className="error">{error}</p>}
       {status && <p className="field-hint">{status}</p>}
+
+      <ApiTokens />
     </div>
+  );
+}
+
+/**
+ * API tokens, for clients that can't hold a session — the MCP server is the
+ * one that needs this.
+ *
+ * The value is shown once, at creation, and never again: the server keeps only
+ * a hash of it. That's why the freshly-minted token stays on screen until it's
+ * explicitly dismissed rather than disappearing on the next render.
+ */
+function ApiTokens() {
+  const [tokens, setTokens] = useState<ApiToken[]>([]);
+  const [name, setName] = useState("");
+  const [canWrite, setCanWrite] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [minted, setMinted] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  async function refresh() {
+    setTokens(await listApiTokens().catch(() => []));
+  }
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      const scopes: ApiTokenScope[] = canWrite
+        ? ["library:read", "library:write"]
+        : ["library:read"];
+      const created = await createApiToken({ name, scopes, currentPassword });
+      setMinted(created.token);
+      setName("");
+      setCurrentPassword("");
+      setCanWrite(false);
+      await refresh();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleRevoke(id: string) {
+    setError(null);
+    try {
+      await revokeApiToken(id);
+      await refresh();
+    } catch (err) {
+      setError(errorText(err));
+    }
+  }
+
+  return (
+    <>
+      <h3>API tokens</h3>
+      <p className="field-hint">
+        For clients that can't sign in through a browser — set one as{" "}
+        <code>MCP_API_TOKEN</code> to point the MCP server at this library.
+      </p>
+
+      {minted && (
+        <div className="form-card">
+          <p className="field-hint">
+            Copy this now. It won't be shown again — only a hash of it is stored.
+          </p>
+          <code className="token-value">{minted}</code>
+          <button type="button" className="secondary-button" onClick={() => setMinted(null)}>
+            Done
+          </button>
+        </div>
+      )}
+
+      {tokens.length > 0 && (
+        <ul className="session-list">
+          {tokens.map((token) => (
+            <li key={token.id}>
+              <span>
+                {token.name} · <code>{token.prefix}…</code>
+              </span>
+              <span className="field-hint">
+                {token.scopes.join(", ")} · last used{" "}
+                {token.last_used_at ? when(token.last_used_at) : "never"}
+              </span>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => handleRevoke(token.id)}
+              >
+                Revoke
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <form onSubmit={handleCreate}>
+        <label className="field">
+          <span className="field-label">Name</span>
+          <input
+            type="text"
+            placeholder="MCP server"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </label>
+        <label className="field-inline">
+          <input
+            type="checkbox"
+            checked={canWrite}
+            onChange={(e) => setCanWrite(e.target.checked)}
+          />
+          <span>Allow saving workouts, not just reading them</span>
+        </label>
+        <label className="field">
+          <span className="field-label">Current password</span>
+          <input
+            type="password"
+            autoComplete="current-password"
+            value={currentPassword}
+            onChange={(e) => setCurrentPassword(e.target.value)}
+          />
+          <span className="field-hint">
+            A token outlives the session that made it, so this asks again.
+          </span>
+        </label>
+        <button
+          type="submit"
+          className="primary-button"
+          disabled={saving || !name || !currentPassword}
+        >
+          {saving ? "Creating…" : "Create token"}
+        </button>
+      </form>
+
+      {error && <p className="error">{error}</p>}
+    </>
   );
 }

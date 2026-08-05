@@ -10,11 +10,18 @@ Two groups of tools:
   collection the web app writes to, so any MCP client can pull a saved or
   benchmark workout (Murph, Fran, ...) by name.
 
-Every query here is scoped to one owner (`MCP_OWNER_ID`, defaulting to the
-single shared-passcode user). There's no session to derive that from — this is
-a local stdio tool, not an HTTP caller — but an unscoped read over a
-collection that already carries `owner_id` is a leak waiting for the second
-user to arrive, and an unscoped *write* saves workouts nobody owns.
+Every query here is scoped to one owner, and that owner comes from an API
+token in `MCP_API_TOKEN` (mint one under Settings → API tokens). There's no
+session to derive it from — this is a local stdio tool, not an HTTP caller —
+which is also why it isn't the OAuth flow the MCP specification describes:
+that's for HTTP transports, and stdio servers are told to take credentials
+from the environment instead.
+
+The token replaced an `MCP_OWNER_ID` setting that simply *named* an owner.
+Naming one asserted who the server was acting as without proving it, so anyone
+who could edit the environment could point it at any library. A token has to
+have been issued to that account, carries scopes, and can be revoked on its
+own.
 """
 
 from __future__ import annotations
@@ -24,34 +31,57 @@ from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 
+from short_timer.api_tokens import resolve_token
 from short_timer.config import get_settings
 from short_timer.db import get_workouts_collection
 from short_timer.llm import parse_workout_text
-from short_timer.models import IntervalClock, Movement, Workout, WorkoutMode, WorkoutSegment
+from short_timer.models import (
+    ApiTokenScope,
+    IntervalClock,
+    Movement,
+    Workout,
+    WorkoutMode,
+    WorkoutSegment,
+)
 
 #: `MCPServer` is what the SDK's FastMCP became in mcp 2.0 — same decorator,
 #: same schema-from-type-hints. The tools below are unchanged by the move.
 mcp = MCPServer("short-timer")
 
 
-def _owner_id() -> str:
-    """The library this server acts on.
+class NotAuthorized(RuntimeError):
+    """Raised when the configured token is missing, unknown, or too narrow.
 
-    There is no default any more. While login was a shared passcode, falling
-    back to the one account everybody used was harmless; now that accounts are
-    real, guessing an owner would mean reading or writing somebody's library
-    by accident. An unconfigured server should refuse, not pick.
+    A plain exception rather than anything protocol-specific: the SDK turns one
+    into a tool error the client can show, and there's nothing an MCP client
+    could usefully *do* with a richer type — the fix is always to change the
+    environment.
     """
-    owner_id = get_settings().mcp_owner_id
-    if not owner_id:
-        raise RuntimeError("MCP_OWNER_ID is not set; the MCP server has no library to act on.")
-    return owner_id
 
 
-def _to_document(workout: Workout) -> dict[str, Any]:
+async def _owner_for(scope: ApiTokenScope) -> str:
+    """The library this server acts on, if the token allows this operation.
+
+    Resolved per call rather than cached at startup, so revoking a token takes
+    effect on the next tool call instead of at the next restart. It's one
+    indexed lookup against a database this process is already talking to.
+    """
+    raw = get_settings().mcp_api_token
+    if not raw:
+        raise NotAuthorized("MCP_API_TOKEN is not set. Mint one under Settings → API tokens.")
+
+    token = await resolve_token(raw)
+    if token is None:
+        raise NotAuthorized("MCP_API_TOKEN is not valid. It may have been revoked.")
+    if scope not in token.scopes:
+        raise NotAuthorized(f"This token does not carry the {scope.value} scope.")
+    return token.user_id
+
+
+def _to_document(workout: Workout, owner_id: str) -> dict[str, Any]:
     doc = workout.model_dump(mode="json")
     doc["_id"] = doc.pop("id")
-    doc["owner_id"] = _owner_id()
+    doc["owner_id"] = owner_id
     return doc
 
 
@@ -124,15 +154,16 @@ async def create_timer_workout(
             for segment in segments
         ],
     )
+    owner_id = await _owner_for(ApiTokenScope.LIBRARY_WRITE)
     collection = get_workouts_collection()
-    await collection.insert_one(_to_document(workout))
+    await collection.insert_one(_to_document(workout, owner_id))
     return workout.model_dump(mode="json")
 
 
 @mcp.tool()
 async def search_workouts(query: str = "", category: str | None = None) -> list[dict[str, Any]]:
     """Search the saved workout library by name/description substring and/or category."""
-    mongo_query: dict[str, Any] = {"owner_id": _owner_id()}
+    mongo_query: dict[str, Any] = {"owner_id": await _owner_for(ApiTokenScope.LIBRARY_READ)}
     if query:
         # Escaped, so a query like "5+" is text to find rather than a pattern
         # for Mongo to run.
@@ -152,7 +183,8 @@ async def search_workouts(query: str = "", category: str | None = None) -> list[
 async def get_workout(workout_id: str) -> dict[str, Any] | None:
     """Fetch a single saved workout by id."""
     collection = get_workouts_collection()
-    doc = await collection.find_one({"_id": workout_id, "owner_id": _owner_id()})
+    owner_id = await _owner_for(ApiTokenScope.LIBRARY_READ)
+    doc = await collection.find_one({"_id": workout_id, "owner_id": owner_id})
     return _from_document(doc) if doc else None
 
 

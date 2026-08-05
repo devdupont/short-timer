@@ -75,13 +75,12 @@ class Settings(BaseSettings):
     #: seconds sheds load instead of absorbing it.
     mongodb_timeout_ms: int = 5_000
 
-    #: Whose library the MCP server reads and writes. It has no session to get
-    #: this from — it's a local stdio tool, not an HTTP caller — so the owner is
-    #: named by the deployment instead. None means the default user, which is
-    #: everyone while the app authenticates with one shared passcode. Not
-    #: imported from `auth` as the constant it defaults to, because `auth`
-    #: imports this module.
-    mcp_owner_id: str | None = None
+    #: How the MCP server authenticates. It has no session to derive an owner
+    #: from — it's a local stdio tool, not an HTTP caller — so it presents a
+    #: per-user API token instead (mint one under Settings → API tokens). This
+    #: replaced an `MCP_OWNER_ID` that merely *named* an owner, which asserted
+    #: an identity without proving it. Empty means the tools refuse.
+    mcp_api_token: str = ""
 
     # NoDecode stops pydantic-settings JSON-decoding this before our validator
     # runs. Without it, the obvious CORS_ORIGINS=https://shortimer.com raises a

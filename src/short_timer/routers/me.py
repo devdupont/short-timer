@@ -13,10 +13,19 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
+from short_timer import api_tokens
 from short_timer.auth import require_session, session_token
 from short_timer.config import get_settings
 from short_timer.crypto import SecretsNotConfiguredError
-from short_timer.models import ChangePasswordRequest, MeResponse, User, UserConfigUpdate
+from short_timer.models import (
+    ApiToken,
+    ApiTokenCreatedResponse,
+    ApiTokenCreateRequest,
+    ChangePasswordRequest,
+    MeResponse,
+    User,
+    UserConfigUpdate,
+)
 from short_timer.passwords import verify_password
 from short_timer.ratelimit import writes_allowed
 from short_timer.sessions import list_sessions, revoke_all_sessions
@@ -120,3 +129,40 @@ async def end_other_sessions(
 
 def _iso(value: object) -> str | None:
     return value.isoformat() if hasattr(value, "isoformat") else None
+
+
+# --- API tokens ---------------------------------------------------------------
+
+
+@router.post("/tokens", response_model=ApiTokenCreatedResponse)
+async def create_api_token(
+    body: ApiTokenCreateRequest, user: CurrentUser
+) -> ApiTokenCreatedResponse:
+    """Mint a token, returning its value exactly once.
+
+    Re-authenticated because this mints a credential that *outlives* the
+    session used to create it — revoking every session wouldn't take it back.
+    """
+    if user.password_hash is None or not verify_password(user.password_hash, body.current_password):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Current password is incorrect."
+        )
+    if not body.scopes:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="A token needs at least one scope.",
+        )
+
+    raw, token = await api_tokens.create_token(user_id=user.id, name=body.name, scopes=body.scopes)
+    return ApiTokenCreatedResponse(api_token=token, token=raw)
+
+
+@router.get("/tokens", response_model=list[ApiToken])
+async def read_api_tokens(user: CurrentUser) -> list[ApiToken]:
+    return await api_tokens.list_tokens(user.id)
+
+
+@router.delete("/tokens/{token_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_api_token(token_id: str, user: CurrentUser) -> None:
+    if not await api_tokens.revoke_token(user.id, token_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such token.")

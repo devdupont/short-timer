@@ -1560,3 +1560,25 @@ button {
   overflow-wrap: anywhere;
   padding: 10px 12px;
 }
+
+/* A freshly minted API token: shown once, so it has to be easy to select and
+   must not be truncated. */
+.token-value {
+  background: var(--surface-2, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+  padding: 10px 12px;
+  user-select: all;
+}
+
+.field-inline {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  font-size: 13px;
+}

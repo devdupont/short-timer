@@ -1,4 +1,7 @@
 import type {
+  ApiToken,
+  ApiTokenCreated,
+  ApiTokenScope,
   Concept2WodEntry,
   Invite,
   InviteCheck,
@@ -127,6 +130,34 @@ export function listSessions(): Promise<SessionView[]> {
 /** Sign out everywhere else, keeping this session. */
 export function endOtherSessions(): Promise<void> {
   return request("/api/me/sessions", { method: "DELETE" });
+}
+
+export function listApiTokens(): Promise<ApiToken[]> {
+  return request("/api/me/tokens");
+}
+
+/**
+ * Mints a token and returns its value — the only time it's ever visible, since
+ * the server stores only a hash. The current password is required because this
+ * credential outlives the session that created it.
+ */
+export function createApiToken(input: {
+  name: string;
+  scopes: ApiTokenScope[];
+  currentPassword: string;
+}): Promise<ApiTokenCreated> {
+  return request("/api/me/tokens", {
+    method: "POST",
+    body: JSON.stringify({
+      name: input.name,
+      scopes: input.scopes,
+      current_password: input.currentPassword,
+    }),
+  });
+}
+
+export function revokeApiToken(id: string): Promise<void> {
+  return request(`/api/me/tokens/${id}`, { method: "DELETE" });
 }
 
 // --- Admin -----------------------------------------------------------------

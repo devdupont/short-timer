@@ -58,10 +58,9 @@ Two things need to exist first:
   it's invisible. Sharing means a third state, and every query that filters
   `{"owner_id": owner_id}` becomes a decision point.
 
-The MCP server acts on one library, named by `MCP_OWNER_ID`, with no default —
-unset, its tools refuse rather than guess. Worth remembering that it resolves
-its owner from configuration rather than from a session: it has no way to
-answer "who's asking?" on its own.
+The MCP server acts on one library, decided by the API token in
+`MCP_API_TOKEN`. It has no session and no way to answer "who's asking?" on its
+own, so the token is the identity.
 
 ## Roles — built
 
@@ -71,5 +70,5 @@ as the break-glass this section argued for. `docs/accounts.md` has the
 reasoning, including why a gym owner is a question of *scope* rather than rank
 and so is still waiting on the plan/tier work.
 
-`MCP_OWNER_ID` is the one piece of this shape that remains: configuration
-standing in for identity, to be replaced by a per-user API token.
+`MCP_OWNER_ID` had the same shape of problem and is gone too — per-user API
+tokens replaced it. See `docs/accounts.md`.

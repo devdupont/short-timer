@@ -127,8 +127,9 @@ same MongoDB collection the web app uses). See
 `src/short_timer/mcp_server.py`.
 
 It reads and writes one owner's library. Having no session to derive that
-from, it takes the owner from `MCP_OWNER_ID`. There is no default: unset, the
-tools refuse rather than guess at someone's library.
+from, it authenticates with a per-user API token in `MCP_API_TOKEN` — mint one
+under Settings → API tokens. The owner and the allowed operations both come
+from the token, and it can be revoked without touching the account.
 
 ## Frontend setup
 

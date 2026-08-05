@@ -135,6 +135,30 @@ pointing real signups at it.
 An MX record on the sending subdomain is required by Postmark for bounce
 processing. It's on the subdomain, so apex mail is unaffected.
 
+## API tokens
+
+Some clients can't hold a session — the MCP server is a local stdio process
+with no browser, no cookie, and nobody to redirect to a login screen. Those
+present a per-user token instead, minted under Settings → API tokens.
+
+That is also what the MCP specification says a stdio server should do: the
+OAuth 2.1 flow it defines (protected resource metadata, resource indicators,
+audience-bound tokens) is for HTTP transports, and stdio servers are told to
+take credentials from the environment. Exposing the MCP server over HTTP
+publicly would mean becoming an OAuth resource server with an authorization
+server behind it — a much larger piece of work, and not built.
+
+The token replaced an `MCP_OWNER_ID` setting that merely *named* an owner.
+Naming one asserted an identity without proving it, so anyone who could edit
+the environment could point the server at any library. A token has to have been
+issued to that account, carries scopes (`library:read`, `library:write`), and
+can be revoked on its own without touching the account.
+
+It's resolved per tool call rather than cached at startup, so revoking one
+takes effect on the next call rather than the next restart. Minting one asks
+for the current password, because the credential outlives the session that
+created it — revoking every session wouldn't take it back.
+
 ## Bootstrapping
 
 Invites come from admins, so an empty database can't produce its first one:
@@ -153,8 +177,8 @@ database it's about to write to and asks for confirmation first, because a local
   value is hashed into the authenticator at creation and cannot be changed:
   a credential registered at the apex works from any subdomain, one registered
   at a subdomain never works at the apex.
-- **The MCP server** resolves its owner from `MCP_OWNER_ID`, which is
-  configuration standing in for identity. Per-user API tokens replace it.
+- ~~**The MCP server**~~ authenticates with a per-user API token now
+  (`MCP_API_TOKEN`); see "API tokens" below.
 - **Account deletion** isn't built. When it is, note that the shared
   `parse_cache` is content-addressed and carries no user linkage, so there is
   nothing user-identifying in it to delete; user-submitted entries age out on

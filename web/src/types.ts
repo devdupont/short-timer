@@ -229,6 +229,25 @@ export interface InviteCreated {
   emailed: boolean;
 }
 
+export type ApiTokenScope = "library:read" | "library:write";
+
+export interface ApiToken {
+  id: string;
+  user_id: string;
+  name: string;
+  scopes: ApiTokenScope[];
+  /** Not secret — the only way to tell two tokens apart in a list. */
+  prefix: string;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+/** The one and only response carrying a token's value. */
+export interface ApiTokenCreated {
+  api_token: ApiToken;
+  token: string;
+}
+
 export interface SessionView {
   created_at: string | null;
   last_seen_at: string | null;
