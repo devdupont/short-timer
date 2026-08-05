@@ -176,7 +176,7 @@ async def test_results_come_back_newest_first() -> None:
 # --- Failure modes -----------------------------------------------------------
 
 
-@pytest.mark.parametrize("status_code", [401, 403, 429, 500])
+@pytest.mark.parametrize("status_code", [400, 401, 403, 429, 500])
 @respx.mock
 async def test_an_upstream_failure_yields_no_workouts_rather_than_raising(
     status_code: int,
@@ -280,3 +280,42 @@ def test_sugarwod_does_not_advertise_a_location_field() -> None:
     info = spec_for(GymProvider.SUGARWOD_OWNER).info
     assert info.location is None
     assert info.program is not None and info.program.label == "Track"
+
+
+async def test_a_rejected_key_is_logged_even_though_it_arrives_as_a_400(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verified against the live API: a bad key is 400, not 401.
+
+    Warning only on 401/403 would make the most likely misconfiguration —
+    someone pasting the wrong key — completely silent, which is precisely the
+    case `GET /api/gym/health` exists to make diagnosable.
+    """
+    with respx.mock:
+        respx.get(API).mock(
+            return_value=httpx.Response(
+                400, json={"errors": {"message": "Invalid API Key.", "code": "Key: undefined"}}
+            )
+        )
+        with caplog.at_level("WARNING"):
+            assert await fetch_recent_owner_wods(3, api_key="wrong", today=date(2026, 8, 4)) == []
+
+    assert "Invalid API Key." in caplog.text
+    # The credential itself must never reach the log.
+    assert "wrong" not in caplog.text.replace("Invalid API Key.", "")
+
+
+async def test_a_missing_key_is_distinguishable_from_a_wrong_one(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """SugarWOD says which it is, and that difference is the whole diagnostic."""
+    with respx.mock:
+        respx.get(API).mock(
+            return_value=httpx.Response(
+                400, json={"errors": {"message": "No API Key found in request.", "code": 999999}}
+            )
+        )
+        with caplog.at_level("WARNING"):
+            await fetch_recent_owner_wods(3, api_key="", today=date(2026, 8, 4))
+
+    assert "No API Key found in request." in caplog.text

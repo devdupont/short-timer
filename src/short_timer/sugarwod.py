@@ -90,6 +90,27 @@ def _as_date(attributes: dict[str, Any], fallback: date) -> date:
     return fallback
 
 
+def _error_message(response: httpx.Response) -> str:
+    """SugarWOD's own explanation of a rejection, for the log line.
+
+    Its errors arrive as `{"errors": {"message": ..., "code": ...}}`. The
+    message is a fixed diagnostic string ("Invalid API Key.") rather than
+    anything derived from the credential, so it is safe to log — and it is the
+    only thing that separates a key we sent but that isn't recognised from one
+    we failed to send at all.
+    """
+    try:
+        payload = response.json()
+    except ValueError:
+        return response.reason_phrase or "no detail"
+    errors = payload.get("errors") if isinstance(payload, dict) else None
+    if isinstance(errors, dict):
+        message = errors.get("message")
+        if isinstance(message, str) and message.strip():
+            return message.strip()
+    return "no detail"
+
+
 def _default_title(day: date) -> str:
     return day.strftime("%A %y%m%d")
 
@@ -157,11 +178,19 @@ async def fetch_window(
         return []
 
     if response.status_code != 200:
-        # 401/403 means the key is wrong or revoked, and 429 means we're asking
-        # too often — both are worth a log because the user can act on them,
-        # neither is worth raising into their feed.
-        if response.status_code in (401, 403):
-            logger.warning("SugarWOD rejected the API key (%s).", response.status_code)
+        # A rejected key comes back as **400**, not 401 — confirmed against the
+        # live API, which answers `{"errors": {"message": "Invalid API Key."}}`
+        # with that status. Warning only on 401/403 would make the single most
+        # likely misconfiguration completely silent, so 400 is included and the
+        # upstream message is logged with it: SugarWOD distinguishes "No API
+        # Key found in request" from "Invalid API Key", which is exactly the
+        # distinction someone debugging a blank feed needs.
+        if response.status_code in (400, 401, 403):
+            logger.warning(
+                "SugarWOD rejected the request (%s): %s",
+                response.status_code,
+                _error_message(response),
+            )
         elif response.status_code == 429:
             logger.warning("SugarWOD rate limited us.")
         return []

@@ -65,12 +65,19 @@ enough to write against, and it's the route the paying customer uses anyway
 (see `docs/pricing.md` — the gym is the buyer). The member route drops into the
 same provider slot once someone confirms its URL.
 
-> **Shipped.** The owner route is `src/short_timer/sugarwod.py`, registered as
-> `GymProvider.SUGARWOD_OWNER`. Like both Wodify routes, it has never run
-> against a live gym — the attribute names come from documentation, so `_first`
-> and `_as_date` tolerate several spellings rather than hard-failing. The first
-> real key is the moment of truth. The member route is a `TODO` in that
-> module's docstring, not a design question.
+> **Shipped**, as `src/short_timer/sugarwod.py` / `GymProvider.SUGARWOD_OWNER`.
+>
+> **Partly verified against the live API.** `https://api.sugarwod.com/v2/workouts`
+> answers, and it distinguishes *no* key (`{"errors": {"message": "No API Key
+> found in request.", "code": 999999}}`) from an *unrecognised* one
+> (`"Invalid API Key."`) — which confirms the endpoint, and confirms the server
+> reads a bare `Authorization: <key>` header. What can't be checked without a
+> real key is the response body: the attribute names come from documentation,
+> so `_first` and `_as_date` tolerate several spellings rather than hard-failing.
+>
+> **A rejected key comes back as HTTP 400, not 401.** Worth knowing before
+> writing any other client against this API. The member route is a `TODO` in
+> that module's docstring, not a design question.
 
 ## Rejected, with reasons
 
