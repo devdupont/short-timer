@@ -338,3 +338,91 @@ async def test_a_cached_parse_costs_nothing_and_says_so(
     parse = await events.find_one({"type": "parse"})
     assert parse is not None and parse["data"]["outcome"] == "pool_hit"
     assert await events.count_documents({"type": "model_call"}) == 0
+
+
+async def test_completing_a_workout_is_recorded(authed_client: AsyncClient) -> None:
+    workout = Workout(name="Fran", mode=WorkoutMode.FOR_TIME)
+    doc = workout.model_dump(mode="json")
+    doc["_id"] = doc.pop("id")
+    doc["owner_id"] = DEFAULT_OWNER_ID
+    await get_workouts_collection().insert_one(doc)
+
+    await authed_client.post(f"/api/workouts/{workout.id}/started")
+    response = await authed_client.post(
+        f"/api/workouts/{workout.id}/completed", json={"elapsed_seconds": 254.7}
+    )
+    assert response.status_code == 204
+
+    body = (await authed_client.get("/api/metrics/me")).json()
+    assert body["workouts_started"] == 1
+    assert body["workouts_completed"] == 1
+    assert body["completion_rate"] == 1.0
+
+    event = await get_events_collection().find_one({"type": "workout_completed"})
+    assert event is not None
+    assert event["data"]["elapsed_seconds"] == 254.7
+    assert event["data"]["mode"] == "for_time"
+
+
+async def test_abandoned_workouts_show_up_as_a_lower_completion_rate(
+    authed_client: AsyncClient,
+) -> None:
+    """The number a start count alone can't give you."""
+    workout = Workout(name="Murph", mode=WorkoutMode.FOR_TIME)
+    doc = workout.model_dump(mode="json")
+    doc["_id"] = doc.pop("id")
+    doc["owner_id"] = DEFAULT_OWNER_ID
+    await get_workouts_collection().insert_one(doc)
+
+    for _ in range(4):
+        await authed_client.post(f"/api/workouts/{workout.id}/started")
+    await authed_client.post(f"/api/workouts/{workout.id}/completed", json={"elapsed_seconds": 60})
+
+    body = (await authed_client.get("/api/metrics/me")).json()
+    assert body["completion_rate"] == 0.25
+
+
+async def test_a_completion_rate_cannot_exceed_one(authed_client: AsyncClient) -> None:
+    """A workout started before the window and finished inside it would."""
+    workout = Workout(name="Cindy", mode=WorkoutMode.AMRAP)
+    doc = workout.model_dump(mode="json")
+    doc["_id"] = doc.pop("id")
+    doc["owner_id"] = DEFAULT_OWNER_ID
+    await get_workouts_collection().insert_one(doc)
+
+    await authed_client.post(f"/api/workouts/{workout.id}/started")
+    for _ in range(3):
+        await authed_client.post(
+            f"/api/workouts/{workout.id}/completed", json={"elapsed_seconds": 1200}
+        )
+
+    assert (await authed_client.get("/api/metrics/me")).json()["completion_rate"] == 1.0
+
+
+async def test_an_implausible_elapsed_time_is_rejected(authed_client: AsyncClient) -> None:
+    """A tab left open overnight would drag every average it touches."""
+    workout = Workout(name="Fran", mode=WorkoutMode.FOR_TIME)
+    doc = workout.model_dump(mode="json")
+    doc["_id"] = doc.pop("id")
+    doc["owner_id"] = DEFAULT_OWNER_ID
+    await get_workouts_collection().insert_one(doc)
+
+    response = await authed_client.post(
+        f"/api/workouts/{workout.id}/completed", json={"elapsed_seconds": 60 * 60 * 24}
+    )
+    assert response.status_code == 422
+    assert await get_events_collection().count_documents({"type": "workout_completed"}) == 0
+
+
+async def test_completing_another_owners_workout_is_a_404(authed_client: AsyncClient) -> None:
+    workout = Workout(name="Theirs", mode=WorkoutMode.FOR_TIME)
+    doc = workout.model_dump(mode="json")
+    doc["_id"] = doc.pop("id")
+    doc["owner_id"] = "someone-else"
+    await get_workouts_collection().insert_one(doc)
+
+    response = await authed_client.post(
+        f"/api/workouts/{workout.id}/completed", json={"elapsed_seconds": 100}
+    )
+    assert response.status_code == 404
+    assert await get_events_collection().count_documents({"type": "workout_completed"}) == 0

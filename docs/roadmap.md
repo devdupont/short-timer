@@ -109,3 +109,67 @@ it's clearly the fallback rather than the mechanism.
 Related: `MCP_OWNER_ID` has the same shape of problem — configuration standing
 in for identity because there isn't any yet. Both should be revisited in the
 same pass.
+
+## Canonical movement names
+
+Right now a movement is whatever text the parser pulled out of whatever the gym
+wrote: "Thrusters", "thruster 95/65", "KB swings", "Strict Press". That's fine
+for putting words on a clock and insufficient for anything that has to *know*
+what the movement is.
+
+Everyone else in this space has solved it. Wodify keys personal bests,
+movement and weight history, and percentage-based loading off canonical
+movement identities — "build to a heavy single, then 5×3 at 80%" is
+unanswerable without one. Hevy does the same thing with
+`exercise_template_id`. It's table stakes for any integration that writes.
+
+**Several names mean the same movement.** Strict press, shoulder press,
+military press and overhead press are one thing. So the useful artifact isn't a
+canonical *name*, it's an **alias table** — many strings collapsing to one id.
+That table is static data rather than code, it's the thing that makes parsing
+robust *and* every integration cheaper, and it's worth building even if no
+export ever ships.
+
+**The trap is that not every near-name is a synonym.** Push press and push jerk
+are not a strict press — they're different movements with different loading.
+Banded, jumping and kipping pull-ups aren't a pull-up, they're scalings of it.
+A table built by pattern-matching on words will collapse things that must stay
+distinct and will quietly corrupt any PR history downstream of it. Aliases and
+variants need to be different relationships from the start; retrofitting that
+distinction after the data exists is the expensive version.
+
+### Whose vocabulary?
+
+The open question, and the one that decides the shape: **every service has its
+own identifiers.** Wodify's canonical names are not Hevy's template ids.
+
+Two ways to go, and the precedent in this codebase points at the second:
+
+- **Adopt one service's vocabulary.** Cheap for that one integration, and every
+  subsequent service becomes a translation from a vocabulary that was never
+  designed to be neutral. N services means N×N mappings.
+- **Own an internal id, and let each adapter map to its own vendor's.** N
+  mappings, each owned by the adapter that already knows that platform. This is
+  exactly what `gym_providers.py` does with `location`/`program`: the storage
+  schema stays vocabulary-free and the registry holds the per-platform naming.
+
+The second is almost certainly right, but it's only worth paying for once
+something actually consumes it — see `docs/exports.md`, where the export path
+is blocked on a result model rather than on this.
+
+### Where canonicalisation happens
+
+A deterministic lookup against the alias table should be primary, with the LLM
+as the fallback for text the table doesn't know. That's the reverse of the
+"have the parser emit a canonical name" idea noted earlier in `docs/exports.md`:
+a table costs no tokens, gives the same answer every time, and can be tested.
+Reserve the model for the long tail, and feed what it resolves back into the
+table.
+
+### The part worth *not* building
+
+Percentage-based loading needs an athlete's one-rep max, which is history —
+which this app has deliberately decided is not its job. The consistent answer
+is to read PRs *from* the connected service rather than accumulate them here,
+for the same reason exports push rather than store: the tracker is the system
+of record. Canonical names are what make that read possible.

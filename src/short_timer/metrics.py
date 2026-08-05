@@ -56,6 +56,11 @@ class EventType(StrEnum):
     #: Someone started a timer. The engagement number, and the one a gym cares
     #: about — programming nobody runs is programming nobody needs.
     WORKOUT_STARTED = "workout_started"
+    #: The clock stopped. Paired with the above it gives a completion rate,
+    #: which says something starts alone can't: whether the programming is the
+    #: right size. It is also the moment an export to someone's own training
+    #: log would fire — see `docs/exports.md`.
+    WORKOUT_COMPLETED = "workout_completed"
     #: A session was minted. The basis of any active-user count.
     LOGIN = "login"
 
@@ -189,6 +194,25 @@ async def record_feed_refresh(*, feed: str, ok: bool, rows: int = 0) -> None:
 
 async def record_workout_started(*, owner_id: str, workout_id: str, mode: str) -> None:
     await record(EventType.WORKOUT_STARTED, owner_id=owner_id, workout_id=workout_id, mode=mode)
+
+
+async def record_workout_completed(
+    *, owner_id: str, workout_id: str, mode: str, elapsed_seconds: float
+) -> None:
+    """The clock stopped, after `elapsed_seconds` on it.
+
+    Deliberately *not* a result: this says how long the clock ran, not what the
+    athlete actually did. Reps, load and score need a model that doesn't exist
+    yet, and inventing half of one here would be the wrong half — see
+    `docs/exports.md`.
+    """
+    await record(
+        EventType.WORKOUT_COMPLETED,
+        owner_id=owner_id,
+        workout_id=workout_id,
+        mode=mode,
+        elapsed_seconds=round(elapsed_seconds, 1),
+    )
 
 
 async def record_login(*, owner_id: str) -> None:

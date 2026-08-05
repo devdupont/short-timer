@@ -65,6 +65,10 @@ class MeMetrics(BaseModel):
     days: int
     parses: ParseUsage
     workouts_started: int = 0
+    workouts_completed: int = 0
+    #: Share of started workouts that reached the end, 0 to 1. Starts alone
+    #: can't tell programming that fits from programming people abandon.
+    completion_rate: float = 0.0
 
 
 class OperatorMetrics(BaseModel):
@@ -114,10 +118,17 @@ async def my_metrics(
 ) -> MeMetrics:
     """The caller's own usage. No cost figures — those are the operator's."""
     totals = await event_totals(days, owner_id=owner_id)
+    started = totals.get("workout_started", 0)
+    completed = totals.get("workout_completed", 0)
     return MeMetrics(
         days=days,
         parses=_usage(await parse_breakdown(days, owner_id=owner_id)),
-        workouts_started=totals.get("workout_started", 0),
+        workouts_started=started,
+        workouts_completed=completed,
+        # Can exceed 1 across a window boundary — a workout started just before
+        # it and finished just inside counts once here and not at all there.
+        # Clamped rather than explained away in every consumer.
+        completion_rate=round(min(completed / started, 1.0), 4) if started else 0.0,
     )
 
 
