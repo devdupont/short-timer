@@ -167,6 +167,17 @@ export function updateWorkout(id: string, workout: Workout): Promise<Workout> {
   });
 }
 
+/**
+ * Tell the server the clock actually started on this workout.
+ *
+ * Fire-and-forget on purpose: it's telemetry, and a failed metric must never
+ * interrupt a workout that's already underway. Errors are swallowed at the
+ * call site rather than here so `request`'s behaviour stays uniform.
+ */
+export function markWorkoutStarted(id: string): Promise<void> {
+  return request(`/api/workouts/${id}/started`, { method: "POST" });
+}
+
 export function deleteWorkout(id: string): Promise<void> {
   return request(`/api/workouts/${id}`, { method: "DELETE" });
 }

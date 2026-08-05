@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, status
@@ -20,12 +20,13 @@ from short_timer.gym_cache import (
     REFRESH_INTERVAL_SECONDS as GYM_REFRESH_INTERVAL_SECONDS,
 )
 from short_timer.gym_cache import refresh_all_configured
+from short_timer.metrics import record_feed_refresh
 from short_timer.parse_cache import (
     backfill_parse_sources,
     migrate_wod_parses,
     prune_expired_parses,
 )
-from short_timer.routers import auth, concept2, gym, hybrid, me, wods, workouts
+from short_timer.routers import auth, concept2, gym, hybrid, me, metrics, wods, workouts
 from short_timer.users import ensure_default_user
 from short_timer.wod_cache import (
     REFRESH_INTERVAL_SECONDS,
@@ -36,68 +37,37 @@ from short_timer.wod_cache import (
 logger = logging.getLogger(__name__)
 
 
-async def _refresh_wods_daily() -> None:
-    """Keep the WOD cache warm so no request ever waits on crossfit.com."""
-    while True:
-        try:
-            await refresh_wod_cache()
-            # Parse each day once here rather than per user on first load.
-            # Runs even when the fetch was skipped as fresh, so a day that
-            # failed to parse earlier gets another attempt.
-            await ensure_wods_parsed()
-        except asyncio.CancelledError:
-            raise
-        except Exception:  # never let a bad fetch kill the loop
-            logger.exception("WOD cache refresh failed; will retry tomorrow.")
-        await asyncio.sleep(REFRESH_INTERVAL_SECONDS)
+async def _refresh_loop(
+    feed: str,
+    interval_seconds: int,
+    fetch: Callable[[], Awaitable[int]],
+    *followups: Callable[[], Awaitable[int]],
+) -> None:
+    """Keep one source warm forever, recording how each attempt went.
 
+    Every feed wants the same three things — fetch, pre-parse, never die — and
+    written out four times that was four places to remember to instrument. The
+    per-feed reasoning that used to live in four docstrings now sits at the
+    call sites in `lifespan`, where the intervals are chosen.
 
-async def _refresh_concept2_daily() -> None:
-    """Keep the Concept2 cache warm, so no request waits on log.concept2.com."""
-    while True:
-        try:
-            await concept2_cache.refresh_concept2_cache()
-            # Runs even when the fetch was skipped as fresh, so a day that
-            # failed to parse earlier gets another attempt.
-            await concept2_cache.ensure_wods_parsed()
-        except asyncio.CancelledError:
-            raise
-        except Exception:  # never let a bad fetch kill the loop
-            logger.exception("Concept2 cache refresh failed; will retry tomorrow.")
-        await asyncio.sleep(concept2_cache.REFRESH_INTERVAL_SECONDS)
-
-
-async def _refresh_hybrid_daily() -> None:
-    """Keep the Hybrid rotation warm.
-
-    Checked daily but only re-fetched weekly (see `MIN_REFRESH_INTERVAL`) — the
-    routine is a fixed rotation, so there's nothing new to find most days.
+    `followups` run after a successful fetch and their return values are
+    ignored: they pre-parse, and "days cached" is the number worth reporting,
+    not "workouts parsed on this particular pass" — which is zero on any cycle
+    that found nothing new, and would read as a failing feed.
     """
     while True:
         try:
-            await hybrid_cache.refresh_hybrid_cache()
-            await hybrid_cache.ensure_wods_parsed()
+            rows = await fetch()
+            for followup in followups:
+                await followup()
         except asyncio.CancelledError:
             raise
         except Exception:  # never let a bad fetch kill the loop
-            logger.exception("Hybrid rotation refresh failed; will retry tomorrow.")
-        await asyncio.sleep(hybrid_cache.REFRESH_INTERVAL_SECONDS)
-
-
-async def _refresh_gyms_periodically() -> None:
-    """Keep each configured gym's workouts warm, so no request waits on a platform.
-
-    More often than the crossfit.com refresh: a gym may post the day's workout
-    at any hour, and there's no single publish time to anchor to.
-    """
-    while True:
-        try:
-            await refresh_all_configured()
-        except asyncio.CancelledError:
-            raise
-        except Exception:  # never let a bad fetch kill the loop
-            logger.exception("Gym refresh failed; will retry next cycle.")
-        await asyncio.sleep(GYM_REFRESH_INTERVAL_SECONDS)
+            logger.exception("%s refresh failed; will retry next cycle.", feed)
+            await record_feed_refresh(feed=feed, ok=False)
+        else:
+            await record_feed_refresh(feed=feed, ok=True, rows=rows)
+        await asyncio.sleep(interval_seconds)
 
 
 #: User-submitted parses age out; sweep for them monthly. The loop runs once
@@ -143,10 +113,38 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.exception("Skipped startup database maintenance.")
 
     background = [
-        asyncio.create_task(_refresh_wods_daily()),
-        asyncio.create_task(_refresh_concept2_daily()),
-        asyncio.create_task(_refresh_hybrid_daily()),
-        asyncio.create_task(_refresh_gyms_periodically()),
+        # Pre-parsing each day here rather than per user on first load is what
+        # makes one model call serve every reader. It runs even when the fetch
+        # was skipped as fresh, so a day that failed to parse gets another go.
+        asyncio.create_task(
+            _refresh_loop(
+                "crossfit", REFRESH_INTERVAL_SECONDS, refresh_wod_cache, ensure_wods_parsed
+            )
+        ),
+        asyncio.create_task(
+            _refresh_loop(
+                "concept2",
+                concept2_cache.REFRESH_INTERVAL_SECONDS,
+                concept2_cache.refresh_concept2_cache,
+                concept2_cache.ensure_wods_parsed,
+            )
+        ),
+        # Checked daily but only re-fetched weekly (see its MIN_REFRESH_INTERVAL)
+        # — the routine is a fixed rotation, so most days there's nothing new.
+        asyncio.create_task(
+            _refresh_loop(
+                "hybrid",
+                hybrid_cache.REFRESH_INTERVAL_SECONDS,
+                hybrid_cache.refresh_hybrid_cache,
+                hybrid_cache.ensure_wods_parsed,
+            )
+        ),
+        # More often than the crossfit.com refresh: a gym may post the day's
+        # workout at any hour, and there's no single publish time to anchor to.
+        # It pre-parses internally, per gym, so it takes no followup.
+        asyncio.create_task(
+            _refresh_loop("gym", GYM_REFRESH_INTERVAL_SECONDS, refresh_all_configured)
+        ),
         asyncio.create_task(_prune_parses_monthly()),
     ]
     try:
@@ -184,6 +182,7 @@ app.include_router(wods.router)
 app.include_router(concept2.router)
 app.include_router(hybrid.router)
 app.include_router(gym.router)
+app.include_router(metrics.router)
 
 
 @app.get("/api/health")

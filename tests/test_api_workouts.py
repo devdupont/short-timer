@@ -83,7 +83,7 @@ async def test_get_unknown_workout_is_404(authed_client: AsyncClient) -> None:
 async def test_parse_endpoint_uses_llm_parser(
     authed_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def fake_parse(text: str, name_hint: str | None = None) -> Workout:
+    async def fake_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
         return _fran().model_copy(update={"source_text": text})
 
     monkeypatch.setattr("short_timer.routers.workouts.parse_workout_text", fake_parse)
@@ -126,7 +126,7 @@ async def test_parse_reuses_saved_workout_without_calling_llm(
     )
     saved_id = saved.json()["id"]
 
-    async def exploding_parse(text: str, name_hint: str | None = None) -> Workout:
+    async def exploding_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
         raise AssertionError("LLM should not be called for a cached workout")
 
     monkeypatch.setattr("short_timer.routers.workouts.parse_workout_text", exploding_parse)
@@ -191,7 +191,7 @@ async def test_another_owners_workout_is_invisible(
 
     # Dedup must not hand us another owner's record for identical text — it
     # should miss the cache and parse fresh instead.
-    async def fake_parse(text: str, name_hint: str | None = None) -> Workout:
+    async def fake_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
         return _fran().model_copy(update={"source_text": text})
 
     monkeypatch.setattr("short_timer.routers.workouts.parse_workout_text", fake_parse)
@@ -211,7 +211,7 @@ async def test_loading_a_prewarmed_wod_costs_no_llm_call(
     # What the daily background task leaves behind in the shared pool.
     await remember_parse(Workout(name="Sunday 260719", mode=WorkoutMode.FOR_TIME, source_text=text))
 
-    async def exploding_parse(text: str, name_hint: str | None = None) -> Workout:
+    async def exploding_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
         raise AssertionError("a pre-parsed WOD must not hit the model")
 
     monkeypatch.setattr("short_timer.routers.workouts.parse_workout_text", exploding_parse)
@@ -236,7 +236,7 @@ async def test_parse_is_shared_across_owners(
 
     calls = 0
 
-    async def counting_parse(text: str, name_hint: str | None = None) -> Workout:
+    async def counting_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
         nonlocal calls
         calls += 1
         return _fran().model_copy(update={"source_text": text})
@@ -267,7 +267,7 @@ async def test_one_owners_edits_do_not_leak_to_another(
     from short_timer.app import app as fastapi_app
     from short_timer.auth import current_owner
 
-    async def fake_parse(text: str, name_hint: str | None = None) -> Workout:
+    async def fake_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
         return _fran().model_copy(update={"source_text": text})
 
     monkeypatch.setattr("short_timer.routers.workouts.parse_workout_text", fake_parse)
@@ -313,7 +313,7 @@ async def test_from_text_creates_then_caches(
 ) -> None:
     calls = 0
 
-    async def counting_parse(text: str, name_hint: str | None = None) -> Workout:
+    async def counting_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
         nonlocal calls
         calls += 1
         return _fran().model_copy(update={"source_text": text})

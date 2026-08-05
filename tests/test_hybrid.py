@@ -164,7 +164,7 @@ async def test_repeats_and_rest_days_cost_no_model_calls(monkeypatch: pytest.Mon
     respx.get(PAGE_URL).mock(return_value=Response(200, text=_PAGE))
     calls = 0
 
-    async def counting_parse(text: str, name_hint: str | None = None) -> Workout:
+    async def counting_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
         nonlocal calls
         calls += 1
         return Workout(name="Parsed", mode=WorkoutMode.CUSTOM, source_text=text)

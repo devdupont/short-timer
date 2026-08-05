@@ -9,6 +9,7 @@ from short_timer.benchmarks import benchmark_workouts
 from short_timer.db import get_workouts_collection
 from short_timer.dedup import source_hash
 from short_timer.llm import WorkoutParseError, parse_workout_text
+from short_timer.metrics import ParseOutcome, record_parse, record_workout_started
 from short_timer.models import (
     SeedResponse,
     Workout,
@@ -151,15 +152,22 @@ async def _parse_or_cached(
     """
     cached = await _find_by_source_text(text, owner_id)
     if cached is not None:
+        await record_parse(outcome=ParseOutcome.LIBRARY_HIT, owner_id=owner_id)
         return cached
     shared = await find_parse(text)
     if shared is not None:
+        # The interesting one: somebody else already paid for this parse. It's
+        # the only direct evidence that pooling parses across users is worth
+        # the complexity it costs.
+        await record_parse(outcome=ParseOutcome.POOL_HIT, owner_id=owner_id)
         return shared
     await _guard_llm_call(request, owner_id)
     try:
-        workout = await parse_workout_text(text, name_hint=name_hint)
+        workout = await parse_workout_text(text, name_hint=name_hint, owner_id=owner_id)
     except WorkoutParseError as exc:
+        await record_parse(outcome=ParseOutcome.FAILED, owner_id=owner_id)
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    await record_parse(outcome=ParseOutcome.MODEL_CALL, owner_id=owner_id)
     await remember_parse(workout)
     return workout
 
@@ -270,6 +278,29 @@ async def list_categories(owner_id: str = Depends(current_owner)) -> list[str]:
     """
     values = await get_workouts_collection().distinct("category", {"owner_id": owner_id})
     return sorted(str(value) for value in values if value)
+
+
+@router.post("/{workout_id}/started", status_code=status.HTTP_204_NO_CONTENT)
+async def mark_started(workout_id: str, owner_id: str = Depends(current_owner)) -> None:
+    """Record that the clock actually started on this workout.
+
+    Its own call rather than something inferred from a read, because loading a
+    workout and *running* it are very different signals — the library gets
+    browsed, and browsing isn't training. Deliberately not behind
+    `writes_allowed`: this is idempotent-ish telemetry, and having a limit
+    reject it would silently bias the numbers toward light users.
+
+    Owner-scoped like every other by-id route, so this can't be used to probe
+    whether another user's workout exists.
+    """
+    doc = await get_workouts_collection().find_one(
+        {"_id": workout_id, "owner_id": owner_id}, {"mode": 1}
+    )
+    if doc is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workout not found")
+    await record_workout_started(
+        owner_id=owner_id, workout_id=workout_id, mode=str(doc.get("mode") or "")
+    )
 
 
 @router.get("/{workout_id}", response_model=Workout)

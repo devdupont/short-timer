@@ -80,7 +80,7 @@ async def test_wods_are_parsed_once_and_shared(monkeypatch: pytest.MonkeyPatch) 
     )
     calls = 0
 
-    async def counting_parse(text: str, name_hint: str | None = None) -> Workout:
+    async def counting_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
         nonlocal calls
         calls += 1
         return Workout(name="Parsed", mode=WorkoutMode.FOR_TIME, source_text=text)
@@ -111,7 +111,7 @@ async def test_rest_days_are_not_parsed(monkeypatch: pytest.MonkeyPatch) -> None
         )
     )
 
-    async def exploding_parse(text: str, name_hint: str | None = None) -> Workout:
+    async def exploding_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
         raise AssertionError("rest days have no workout to parse")
 
     monkeypatch.setattr("short_timer.wod_cache.parse_workout_text", exploding_parse)
@@ -129,7 +129,7 @@ async def test_refetch_preserves_parse_but_stale_text_invalidates_it(
     )
     calls = 0
 
-    async def counting_parse(text: str, name_hint: str | None = None) -> Workout:
+    async def counting_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
         nonlocal calls
         calls += 1
         return Workout(name="Parsed", mode=WorkoutMode.FOR_TIME, source_text=text)

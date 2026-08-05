@@ -155,7 +155,7 @@ async def ensure_wods_parsed(limit: int = CACHE_DAYS) -> int:
             continue
         title = str(doc.get("title") or "") or None
         try:
-            workout = await parse_workout_text(text, name_hint=title)
+            workout = await parse_workout_text(text, name_hint=title, purpose="prewarm:concept2")
         except Exception:  # one bad day shouldn't stop the rest
             logger.exception("Could not pre-parse Concept2 WOD %s", doc.get("date"))
             continue

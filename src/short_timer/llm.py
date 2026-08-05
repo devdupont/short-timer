@@ -10,7 +10,7 @@ from __future__ import annotations
 from functools import lru_cache
 
 from anthropic import AsyncAnthropic
-from anthropic.types import ToolChoiceToolParam, ToolParam
+from anthropic.types import Message, ToolChoiceToolParam, ToolParam
 
 from short_timer.config import get_settings
 from short_timer.models import Workout
@@ -181,6 +181,32 @@ class WorkoutParseError(RuntimeError):
     """Raised when the LLM's response can't be turned into a `Workout`."""
 
 
+async def _record_usage(response: Message, *, owner_id: str | None, purpose: str) -> None:
+    """Log the token cost of one call to the metrics stream.
+
+    The cache fields are read even though prompt caching isn't switched on yet
+    — they report zero until it is, and reading them now means the day someone
+    adds a `cache_control` marker the saving shows up in the numbers without a
+    second change. Imported here rather than at module scope to keep `metrics`
+    off the import path of the MCP server and the scraper, neither of which has
+    a database.
+    """
+    from short_timer.metrics import record_model_call
+
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return
+    await record_model_call(
+        model=str(getattr(response, "model", "") or get_settings().anthropic_model),
+        input_tokens=int(getattr(usage, "input_tokens", 0) or 0),
+        output_tokens=int(getattr(usage, "output_tokens", 0) or 0),
+        cache_read_tokens=int(getattr(usage, "cache_read_input_tokens", 0) or 0),
+        cache_write_tokens=int(getattr(usage, "cache_creation_input_tokens", 0) or 0),
+        owner_id=owner_id,
+        purpose=purpose,
+    )
+
+
 @lru_cache
 def _client() -> AsyncAnthropic:
     """One client, reused across requests.
@@ -198,7 +224,20 @@ def _client() -> AsyncAnthropic:
     )
 
 
-async def parse_workout_text(text: str, name_hint: str | None = None) -> Workout:
+async def parse_workout_text(
+    text: str,
+    name_hint: str | None = None,
+    *,
+    owner_id: str | None = None,
+    purpose: str = "parse",
+) -> Workout:
+    """Turn workout text into a `Workout`, and record what the call cost.
+
+    `owner_id` and `purpose` exist only for the metrics event. Instrumenting
+    here rather than at each of the six call sites means a new one can't
+    forget: this function *is* the moment money is spent, so it's the only
+    place that can't miss a call.
+    """
     settings = get_settings()
     client = _client()
 
@@ -213,6 +252,11 @@ async def parse_workout_text(text: str, name_hint: str | None = None) -> Workout
         tool_choice=tool_choice,
         messages=[{"role": "user", "content": user_content}],
     )
+
+    # Before the response is inspected: the tokens were spent whether or not
+    # the payload turns out to be usable, and a parse that fails validation is
+    # exactly the kind of waste worth being able to see.
+    await _record_usage(response, owner_id=owner_id, purpose=purpose)
 
     tool_use = next((b for b in response.content if b.type == "tool_use"), None)
     if tool_use is None:

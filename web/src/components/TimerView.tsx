@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { markWorkoutStarted } from "../api";
 import { useTimerEngine } from "../hooks/useTimerEngine";
 import { useTimerAudio } from "../hooks/useTimerAudio";
 import { useWakeLock } from "../hooks/useWakeLock";
@@ -273,6 +274,10 @@ function ClockView({ workout }: { workout: Workout }) {
               // the audio context so later beeps are allowed to play.
               audio.unlock();
               controls.start();
+              // Telemetry, deliberately unawaited and with failures ignored:
+              // nothing about a running clock should depend on it. Only saved
+              // workouts have an id the server can attribute.
+              if (workout.id) void markWorkoutStarted(workout.id).catch(() => {});
             }}
           >
             Start
