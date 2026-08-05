@@ -11,6 +11,8 @@ import type {
   GymProviderInfo,
   HybridWodEntry,
   Me,
+  Passkey,
+  PasskeyChallenge,
   Role,
   SessionView,
   UserConfigUpdate,
@@ -130,6 +132,46 @@ export function listSessions(): Promise<SessionView[]> {
 /** Sign out everywhere else, keeping this session. */
 export function endOtherSessions(): Promise<void> {
   return request("/api/me/sessions", { method: "DELETE" });
+}
+
+// --- Passkeys ---------------------------------------------------------------
+
+export function passkeyRegisterChallenge(): Promise<PasskeyChallenge> {
+  return request("/api/me/passkeys/challenge", { method: "POST" });
+}
+
+export function registerPasskey(input: {
+  challengeHandle: string;
+  credential: unknown;
+  nickname: string;
+}): Promise<Passkey> {
+  return request("/api/me/passkeys", {
+    method: "POST",
+    body: JSON.stringify({
+      challenge_handle: input.challengeHandle,
+      credential: input.credential,
+      nickname: input.nickname,
+    }),
+  });
+}
+
+export function listPasskeys(): Promise<Passkey[]> {
+  return request("/api/me/passkeys");
+}
+
+export function deletePasskey(id: string): Promise<void> {
+  return request(`/api/me/passkeys/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export function passkeyLoginChallenge(): Promise<PasskeyChallenge> {
+  return request("/api/auth/passkey/challenge", { method: "POST" });
+}
+
+export function passkeyLogin(challengeHandle: string, credential: unknown): Promise<void> {
+  return request("/api/auth/passkey/login", {
+    method: "POST",
+    body: JSON.stringify({ challenge_handle: challengeHandle, credential }),
+  });
 }
 
 export function listApiTokens(): Promise<ApiToken[]> {

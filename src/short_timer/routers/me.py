@@ -8,12 +8,13 @@ than by remembering to strip fields here.
 
 from __future__ import annotations
 
+import json
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
-from short_timer import api_tokens
+from short_timer import api_tokens, passkeys
 from short_timer.auth import require_session, session_token
 from short_timer.config import get_settings
 from short_timer.crypto import SecretsNotConfiguredError
@@ -23,6 +24,9 @@ from short_timer.models import (
     ApiTokenCreateRequest,
     ChangePasswordRequest,
     MeResponse,
+    Passkey,
+    PasskeyChallengeResponse,
+    PasskeyRegisterRequest,
     User,
     UserConfigUpdate,
 )
@@ -129,6 +133,43 @@ async def end_other_sessions(
 
 def _iso(value: object) -> str | None:
     return value.isoformat() if hasattr(value, "isoformat") else None
+
+
+# --- Passkeys -----------------------------------------------------------------
+
+
+@router.post("/passkeys/challenge", response_model=PasskeyChallengeResponse)
+async def passkey_register_challenge(user: CurrentUser) -> PasskeyChallengeResponse:
+    """Start registering a passkey against the signed-in account."""
+    handle, options = await passkeys.start_registration(user)
+    return PasskeyChallengeResponse(challenge_handle=handle, options=json.loads(options))
+
+
+@router.post("/passkeys", response_model=Passkey)
+async def register_passkey(body: PasskeyRegisterRequest, user: CurrentUser) -> Passkey:
+    try:
+        return await passkeys.finish_registration(
+            user, body.challenge_handle, body.credential, body.nickname
+        )
+    except passkeys.PasskeyError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/passkeys", response_model=list[Passkey])
+async def read_passkeys(user: CurrentUser) -> list[Passkey]:
+    return await passkeys.list_passkeys(user.id)
+
+
+@router.delete("/passkeys/{credential_id:path}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_passkey(credential_id: str, user: CurrentUser) -> None:
+    """Remove a passkey.
+
+    Removing the last one is allowed: every account here also has a password
+    and a verified address, so there's always a way back in. That would need
+    revisiting the day passkey-only accounts exist.
+    """
+    if not await passkeys.delete_passkey(user.id, credential_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such passkey.")
 
 
 # --- API tokens ---------------------------------------------------------------

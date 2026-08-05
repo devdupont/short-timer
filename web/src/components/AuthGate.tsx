@@ -4,10 +4,13 @@ import {
   checkInvite,
   forgotPassword,
   login,
+  passkeyLogin,
+  passkeyLoginChallenge,
   register,
   resetPassword,
   verifyEmail,
 } from "../api";
+import { getCredential, passkeysSupported } from "../passkeys";
 import type { InviteCheck } from "../types";
 
 /**
@@ -89,6 +92,27 @@ function LoginForm({
     }
   }
 
+  async function handlePasskey() {
+    setSubmitting(true);
+    setError(null);
+    try {
+      const challenge = await passkeyLoginChallenge();
+      const credential = await getCredential(challenge.options);
+      await passkeyLogin(challenge.challenge_handle, credential);
+      onSignedIn();
+    } catch (err) {
+      // A cancelled prompt throws too, and telling someone their deliberate
+      // cancellation was an error is just noise.
+      if (err instanceof DOMException && err.name === "NotAllowedError") {
+        setError(null);
+      } else {
+        setError(errorText(err));
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   return (
     <form onSubmit={handleSubmit}>
       <p className="section-sub">Sign in to your account.</p>
@@ -119,6 +143,16 @@ function LoginForm({
       >
         {submitting ? "Signing in…" : "Sign in"}
       </button>
+      {passkeysSupported() && (
+        <button
+          type="button"
+          className="secondary-button"
+          disabled={submitting}
+          onClick={handlePasskey}
+        >
+          Sign in with a passkey
+        </button>
+      )}
       <button type="button" className="link-button" onClick={onForgot}>
         Forgot your password?
       </button>

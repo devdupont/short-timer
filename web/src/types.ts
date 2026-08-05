@@ -229,6 +229,27 @@ export interface InviteCreated {
   emailed: boolean;
 }
 
+export interface Passkey {
+  id: string;
+  user_id: string;
+  nickname: string;
+  sign_count: number;
+  aaguid: string;
+  /** False for a device-bound passkey, which is lost with the device. */
+  backed_up: boolean;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+/** Options built by the server and handed straight to the WebAuthn API. */
+export interface PasskeyChallenge {
+  challenge_handle: string;
+  // `any` because this is the spec's shape, not ours — re-describing it here
+  // would be a second place for it to drift.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  options: any;
+}
+
 export type ApiTokenScope = "library:read" | "library:write";
 
 export interface ApiToken {

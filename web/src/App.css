@@ -1582,3 +1582,13 @@ button {
   gap: 8px;
   font-size: 13px;
 }
+
+/* Buttons in the auth card stack full-width. `.secondary-button` is normally
+   content-sized, which left "Sign in with a passkey" visibly narrower than the
+   submit button directly above it. */
+.auth-card .primary-button,
+.auth-card .secondary-button {
+  display: block;
+  margin-top: 10px;
+  width: 100%;
+}

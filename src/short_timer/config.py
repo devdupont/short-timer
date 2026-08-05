@@ -45,6 +45,24 @@ class Settings(BaseSettings):
     verify_ttl_hours: int = 48
     reset_ttl_minutes: int = 60
 
+    # --- Passkeys -----------------------------------------------------------
+    #: **This value is permanent.** It is hashed into every credential at
+    #: creation and cannot be changed afterwards: a passkey registered at the
+    #: apex works from any subdomain, while one registered at
+    #: `api.shortimer.com` could never be used at the apex or a sibling. So it
+    #: must be the apex, and changing it invalidates every passkey ever issued.
+    webauthn_rp_id: str = "localhost"
+    #: What the passkey picker shows the user.
+    webauthn_rp_name: str = "shortimer"
+    #: Origins the ceremony may come from — the *site*, not this API. They
+    #: differ on purpose: the browser is on shortimer.com while this code runs
+    #: on api.shortimer.com, which is legal because the RP ID may be a
+    #: registrable suffix of the origin. Same NoDecode treatment as
+    #: cors_origins.
+    webauthn_origins: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["http://localhost:5173"]
+    )
+
     # --- Outbound email (Postmark) ------------------------------------------
     #: Off by default so local dev and CI never try to send. Tokens are logged
     #: instead, which is what makes the whole flow testable without a provider.
@@ -89,7 +107,13 @@ class Settings(BaseSettings):
         default_factory=lambda: ["http://localhost:5173"]
     )
 
-    @field_validator("cors_origins", "secrets_keys", "metrics_admin_user_ids", mode="before")
+    @field_validator(
+        "cors_origins",
+        "secrets_keys",
+        "metrics_admin_user_ids",
+        "webauthn_origins",
+        mode="before",
+    )
     @classmethod
     def _split_list(cls, value: object) -> object:
         """Accept a comma-separated list, a JSON array, or a real list."""

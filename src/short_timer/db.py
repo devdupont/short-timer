@@ -97,6 +97,20 @@ def get_email_tokens_collection() -> AsyncCollection[dict[str, Any]]:
     return get_database()["email_tokens"]
 
 
+def get_credentials_collection() -> AsyncCollection[dict[str, Any]]:
+    """Registered passkeys, keyed by the authenticator's credential id.
+
+    That id is chosen by the authenticator, not by us — it's what the browser
+    sends back to say which credential signed, so it has to be the key.
+    """
+    return get_database()["credentials"]
+
+
+def get_webauthn_challenges_collection() -> AsyncCollection[dict[str, Any]]:
+    """In-flight passkey challenges. Single use, and short-lived."""
+    return get_database()["webauthn_challenges"]
+
+
 def get_api_tokens_collection() -> AsyncCollection[dict[str, Any]]:
     """Long-lived per-user tokens for clients with no session (see api_tokens).
 
@@ -177,6 +191,12 @@ async def ensure_indexes() -> None:
     # screen lists one user's tokens.
     await get_api_tokens_collection().create_index("token_hash", unique=True)
     await get_api_tokens_collection().create_index("user_id")
+    # The settings screen lists one user's passkeys; authentication looks one
+    # up by its credential id, which is already the `_id`.
+    await get_credentials_collection().create_index("user_id")
+    # Challenges are spent on read and expire in code; this is the janitor for
+    # the ceremonies nobody ever finishes.
+    await get_webauthn_challenges_collection().create_index("expires_at", expireAfterSeconds=0)
     # One account per address. Sparse, because the shared-passcode account has
     # no email and two documents with a missing field would otherwise collide
     # on a plain unique index.

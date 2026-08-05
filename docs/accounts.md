@@ -135,6 +135,39 @@ pointing real signups at it.
 An MX record on the sending subdomain is required by Postmark for bounce
 processing. It's on the subdomain, so apex mail is unaffected.
 
+## Passkeys
+
+A passkey replaces the *password*, not the account. There's still an email
+address underneath, because a passkey that only exists on a lost phone needs a
+way back in — and that way is the reset flow. Removing your last passkey is
+therefore allowed.
+
+Both ceremonies are two round trips: we issue a challenge, the authenticator
+signs it, we verify against the stored public key. The challenge is the
+anti-replay measure, so it's ours, single-use, and five minutes long — stored
+server-side and spent on read, for the same reason session expiry isn't left to
+the TTL index.
+
+**The RP ID is permanent and must be the apex.** `WEBAUTHN_RP_ID=shortimer.com`,
+never `api.shortimer.com`. It's hashed into the credential at creation and can
+never be changed: a credential registered at the apex works from any subdomain,
+while one registered at a subdomain could never be used at the apex or a
+sibling. Recovering from getting this wrong means a `.well-known/webauthn`
+Related Origins file, so it's worth getting right once.
+
+The RP ID and the *origin* differ on purpose — the browser is on
+`shortimer.com` while this code runs on `api.shortimer.com`. That's legal
+because the RP ID may be a registrable suffix of the origin.
+
+Registration asks for a resident key and authentication sends an empty
+`allow_credentials`. Together that's what makes "sign in with a passkey" work
+with no email typed first: the browser offers whichever passkey it holds for
+the site, and the credential itself says who owns it. It also means the login
+challenge endpoint reveals nothing about which accounts exist.
+
+The stored `sign_count` is a clone detector. Many passkeys report a constant 0,
+which means "not supported" rather than "cloned", so it's advisory.
+
 ## API tokens
 
 Some clients can't hold a session — the MCP server is a local stdio process
@@ -173,10 +206,6 @@ database it's about to write to and asks for confirmation first, because a local
 
 ## Still open
 
-- **Passkeys** are next, and the RP ID must be the `shortimer.com` apex. That
-  value is hashed into the authenticator at creation and cannot be changed:
-  a credential registered at the apex works from any subdomain, one registered
-  at a subdomain never works at the apex.
 - ~~**The MCP server**~~ authenticates with a per-user API token now
   (`MCP_API_TOKEN`); see "API tokens" below.
 - **Account deletion** isn't built. When it is, note that the shared

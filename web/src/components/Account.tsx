@@ -3,13 +3,24 @@ import {
   ApiError,
   changePassword,
   createApiToken,
+  deletePasskey,
   endOtherSessions,
   listApiTokens,
+  listPasskeys,
   listSessions,
+  passkeyRegisterChallenge,
+  registerPasskey,
   resendVerification,
   revokeApiToken,
 } from "../api";
-import type { ApiToken, ApiTokenScope, Me, SessionView } from "../types";
+import { createCredential, passkeysSupported } from "../passkeys";
+import type {
+  ApiToken,
+  ApiTokenScope,
+  Me,
+  Passkey as PasskeyType,
+  SessionView,
+} from "../types";
 
 function errorText(err: unknown): string {
   return err instanceof ApiError ? err.message : "Could not reach the server.";
@@ -156,8 +167,139 @@ export function Account({ me }: { me: Me }) {
       {error && <p className="error">{error}</p>}
       {status && <p className="field-hint">{status}</p>}
 
+      <Passkeys />
       <ApiTokens />
     </div>
+  );
+}
+
+/**
+ * Passkeys registered against this account.
+ *
+ * A passkey replaces the password at sign-in, not the account: there's still
+ * an email address underneath, because a passkey that only exists on a lost
+ * phone needs a way back in. That's also why the nudge below appears — a
+ * device-bound passkey (`backed_up: false`) dies with the device, whereas a
+ * synced one survives it.
+ */
+function Passkeys() {
+  const [items, setItems] = useState<PasskeyType[]>([]);
+  const [nickname, setNickname] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function refresh() {
+    setItems(await listPasskeys().catch(() => []));
+  }
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  async function handleAdd(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    setStatus(null);
+    try {
+      const challenge = await passkeyRegisterChallenge();
+      const credential = await createCredential(challenge.options);
+      await registerPasskey({
+        challengeHandle: challenge.challenge_handle,
+        credential,
+        nickname,
+      });
+      setNickname("");
+      setStatus("Passkey added.");
+      await refresh();
+    } catch (err) {
+      // Cancelling the browser prompt throws as well; that's a choice, not a
+      // failure worth reporting back.
+      if (err instanceof DOMException && err.name === "NotAllowedError") {
+        setError(null);
+      } else {
+        setError(errorText(err));
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDelete(id: string) {
+    setError(null);
+    try {
+      await deletePasskey(id);
+      await refresh();
+    } catch (err) {
+      setError(errorText(err));
+    }
+  }
+
+  if (!passkeysSupported()) {
+    return (
+      <>
+        <h3>Passkeys</h3>
+        <p className="field-hint">This browser doesn't support passkeys.</p>
+      </>
+    );
+  }
+
+  const onlyDeviceBound = items.length === 1 && !items[0].backed_up;
+
+  return (
+    <>
+      <h3>Passkeys</h3>
+      <p className="field-hint">
+        Sign in with a fingerprint, face, or security key instead of your password.
+      </p>
+
+      {items.length > 0 && (
+        <ul className="session-list">
+          {items.map((passkey) => (
+            <li key={passkey.id}>
+              <span>{passkey.nickname}</span>
+              <span className="field-hint">
+                {passkey.backed_up ? "Synced" : "This device only"} · last used{" "}
+                {passkey.last_used_at ? when(passkey.last_used_at) : "never"}
+              </span>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => handleDelete(passkey.id)}
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {onlyDeviceBound && (
+        <p className="field-hint">
+          This passkey is tied to one device, so losing it means losing the passkey. Adding a
+          second one — on a phone, or a security key — is worth the minute.
+        </p>
+      )}
+
+      <form onSubmit={handleAdd}>
+        <label className="field">
+          <span className="field-label">Name</span>
+          <input
+            type="text"
+            placeholder="My phone"
+            value={nickname}
+            onChange={(e) => setNickname(e.target.value)}
+          />
+        </label>
+        <button type="submit" className="primary-button" disabled={busy || !nickname}>
+          {busy ? "Waiting for your device…" : "Add a passkey"}
+        </button>
+      </form>
+
+      {error && <p className="error">{error}</p>}
+      {status && <p className="field-hint">{status}</p>}
+    </>
   );
 }
 

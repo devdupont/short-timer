@@ -82,11 +82,18 @@ az containerapp update \
     EMAIL_ENABLED=true \
     EMAIL_FROM="shortimer <no-reply@send.shortimer.com>" \
     PUBLIC_BASE_URL=https://shortimer.com \
+    WEBAUTHN_RP_ID=shortimer.com \
+    WEBAUTHN_ORIGINS=https://shortimer.com \
     MONGODB_DB_NAME=short_timer \
     SESSION_COOKIE_SECURE=true \
     CORS_ORIGINS=https://shortimer.com \
     TRUSTED_PROXY_HOPS=1
 ```
+
+`WEBAUTHN_RP_ID` is **permanent**. It's hashed into every passkey at creation,
+so changing it invalidates all of them. It must be the apex `shortimer.com`,
+not `api.shortimer.com`: a credential registered at the apex works from any
+subdomain, while the reverse never works.
 
 `TRUSTED_PROXY_HOPS=1` is load-bearing. Container Apps' ingress *appends* to
 `X-Forwarded-For`, so anything the caller sends arrives to the left of the

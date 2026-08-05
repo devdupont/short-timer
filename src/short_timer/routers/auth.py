@@ -16,6 +16,7 @@ charged, so signing in correctly never costs anything.
 
 from __future__ import annotations
 
+import json
 import logging
 import secrets
 from functools import lru_cache
@@ -24,7 +25,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from short_timer import email as email_module
-from short_timer import email_tokens, invites
+from short_timer import email_tokens, invites, passkeys
 from short_timer.auth import current_owner, end_session, session_token, start_session
 from short_timer.config import get_settings
 from short_timer.email_tokens import TokenKind
@@ -35,6 +36,8 @@ from short_timer.models import (
     InviteCheckResponse,
     LoginRequest,
     MeResponse,
+    PasskeyChallengeResponse,
+    PasskeyLoginRequest,
     RegisterRequest,
     ResetPasswordRequest,
     VerifyEmailRequest,
@@ -210,6 +213,44 @@ async def logout_everywhere(
     """End every session for this account, including this one."""
     await revoke_all_sessions(owner_id)
     await end_session(response, token)
+
+
+# --- Signing in with a passkey ------------------------------------------------
+
+
+@router.post("/passkey/challenge", response_model=PasskeyChallengeResponse)
+async def passkey_login_challenge(request: Request) -> PasskeyChallengeResponse:
+    """Start a passkey sign-in.
+
+    Unauthenticated by necessity, and it reveals nothing: the options carry an
+    empty `allow_credentials`, so the answer is the same whoever is asking.
+    Still rate-limited per address, because it does write a challenge row.
+    """
+    await enforce(login_limit(), f"ip:{client_ip(request)}")
+    handle, options = await passkeys.start_authentication()
+    return PasskeyChallengeResponse(challenge_handle=handle, options=json.loads(options))
+
+
+@router.post("/passkey/login", status_code=status.HTTP_204_NO_CONTENT)
+async def passkey_login(body: PasskeyLoginRequest, request: Request, response: Response) -> None:
+    try:
+        user_id = await passkeys.finish_authentication(body.challenge_handle, body.credential)
+    except passkeys.PasskeyError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+
+    user = await get_user(user_id)
+    if user is None:
+        # The credential outlived the account it belonged to.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="That passkey is not registered."
+        )
+    if user.status is not AccountStatus.ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="This account has been disabled."
+        )
+
+    await record_login(owner_id=user.id)
+    await start_session(response, request, user.id)
 
 
 # --- Email verification ------------------------------------------------------

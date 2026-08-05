@@ -27,6 +27,9 @@ dependencies = [
     "argon2-cffi>=25.1",
     # Encrypts per-user third-party credentials at rest (see crypto.py).
     "cryptography>=43",
+    # Server side of the WebAuthn ceremonies behind passkeys (see passkeys.py).
+    # 3.x verifies post-quantum ML-DSA credentials and prefers EdDSA keypairs.
+    "webauthn>=3,<4",
     # 2.x: `mcp.server.fastmcp.FastMCP` became `mcp.server.mcpserver.MCPServer`,
     # which mcp_server.py now uses. Capped below 3 so the next major can't
     # arrive unannounced the way 2.0 did — the API this depends on is a class
