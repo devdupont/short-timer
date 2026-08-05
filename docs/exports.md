@@ -126,10 +126,12 @@ Three tools, in order of preference:
    The fallback for anything still unmatched, and the reason nothing has to be
    dropped on the floor.
 
-One cheap thing that would help, and could be done long before any of this:
-have the parser emit a **canonical movement name** alongside the verbatim one.
-The prompt already normalises far messier things, and a stable canonical name
-turns a fuzzy-match problem into a lookup.
+This is a specific case of a bigger question — canonical movement identities,
+which every platform in this space maintains and which also underpin personal
+bests and percentage-based loading. See *Canonical movement names* in
+`docs/roadmap.md`, which covers the alias problem, why a deterministic table
+should lead rather than the parser, and the open question of whose vocabulary
+to own.
 
 ## Order of work, when it's picked up
 
