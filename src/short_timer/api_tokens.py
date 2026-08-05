@@ -106,8 +106,3 @@ async def revoke_token(user_id: str, token_id: str) -> bool:
     """
     result = await get_api_tokens_collection().delete_one({"_id": token_id, "user_id": user_id})
     return result.deleted_count == 1
-
-
-async def revoke_all_tokens(user_id: str) -> int:
-    result = await get_api_tokens_collection().delete_many({"user_id": user_id})
-    return int(result.deleted_count)

@@ -192,6 +192,15 @@ takes effect on the next call rather than the next restart. Minting one asks
 for the current password, because the credential outlives the session that
 created it — revoking every session wouldn't take it back.
 
+**A password reset does not revoke API tokens**, which is a deliberate choice
+and worth knowing. Resetting ends every *session*, but a token is a named,
+long-lived integration credential, and breaking the MCP server on every routine
+password change would be its own kind of wrong. It's also what GitHub and
+GitLab do with personal access tokens. Minting one requires the current
+password, so a stolen session alone can't produce one — but if you reset
+because you think someone *had* your password, revoke the tokens too. They're
+listed with a "last used" time under Settings for exactly that.
+
 ## Bootstrapping
 
 Invites come from admins, so an empty database can't produce its first one:
