@@ -7,6 +7,7 @@ from short_timer.auth import (
     create_session_token,
 )
 from short_timer.config import get_settings
+from short_timer.metrics import record_login
 from short_timer.models import LoginRequest
 from short_timer.ratelimit import client_ip, enforce, login_limit, peek
 from short_timer.users import ensure_default_user
@@ -32,6 +33,7 @@ async def login(body: LoginRequest, request: Request, response: Response) -> Non
     # method later mints a token for a different user, and nothing downstream
     # needs to change.
     await ensure_default_user()
+    await record_login(owner_id=DEFAULT_OWNER_ID)
 
     settings = get_settings()
     response.set_cookie(

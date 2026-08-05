@@ -58,7 +58,7 @@ class Settings(BaseSettings):
         default_factory=lambda: ["http://localhost:5173"]
     )
 
-    @field_validator("cors_origins", "secrets_keys", mode="before")
+    @field_validator("cors_origins", "secrets_keys", "metrics_admin_user_ids", mode="before")
     @classmethod
     def _split_list(cls, value: object) -> object:
         """Accept a comma-separated list, a JSON array, or a real list."""
@@ -96,6 +96,20 @@ class Settings(BaseSettings):
     writes_per_minute_per_subject: int = 120
     #: Longest workout text we'll accept; guards token spend on huge pastes.
     max_workout_text_chars: int = 20_000
+
+    # --- Metrics ------------------------------------------------------------
+    #: Off switches the recording, not just the reading — a deployment that
+    #: doesn't want an events collection shouldn't grow one.
+    metrics_enabled: bool = True
+    #: How long raw events are kept, enforced by a TTL index. Long enough to
+    #: compare a month against the same month last year, which is the longest
+    #: comparison anyone actually makes here.
+    events_retention_days: int = 400
+    #: Who may read the *operator* metrics — global spend and other users'
+    #: activity. Empty means nobody, which is the right default: there are no
+    #: roles yet, and a shared passcode would otherwise hand every visitor the
+    #: Anthropic bill. Same NoDecode treatment as cors_origins.
+    metrics_admin_user_ids: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
 
 @lru_cache

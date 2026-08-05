@@ -111,7 +111,7 @@ async def ensure_wods_parsed() -> int:
             await mark_permanent(text, source=SOURCE_HYBRID)
             continue
         try:
-            workout = await parse_workout_text(text)
+            workout = await parse_workout_text(text, purpose="prewarm:hybrid")
         except Exception:  # one bad day shouldn't stop the rest
             logger.exception("Could not pre-parse Hybrid workout %r", text[:40])
             continue

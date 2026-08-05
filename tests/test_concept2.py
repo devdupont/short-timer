@@ -158,7 +158,7 @@ async def test_a_repeated_workout_is_only_parsed_once(monkeypatch: pytest.Monkey
     respx.route(url__regex=_URL_PATTERN).mock(return_value=Response(200, text=_page(_TITLE)))
     calls = 0
 
-    async def counting_parse(text: str, name_hint: str | None = None) -> Workout:
+    async def counting_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
         nonlocal calls
         calls += 1
         return Workout(name="Parsed", mode=WorkoutMode.INTERVAL, source_text=text)

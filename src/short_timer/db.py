@@ -5,7 +5,9 @@ support (`pymongo.AsyncMongoClient`, 4.9+); this talks to Mongo directly
 through that instead.
 """
 
+import inspect
 import logging
+from collections.abc import AsyncIterable
 from functools import lru_cache
 from typing import Any
 
@@ -79,6 +81,31 @@ def get_rate_limit_collection() -> AsyncCollection[dict[str, Any]]:
     return get_database()["rate_limits"]
 
 
+def get_events_collection() -> AsyncCollection[dict[str, Any]]:
+    """What the app did, one document per event (see metrics.py)."""
+    return get_database()["events"]
+
+
+async def aggregate(
+    collection: AsyncCollection[dict[str, Any]], pipeline: list[dict[str, Any]]
+) -> AsyncIterable[dict[str, Any]]:
+    """Run an aggregation, tolerating both async-cursor conventions.
+
+    PyMongo's async client returns a *coroutine* that yields the cursor, while
+    the mongomock double the tests run against returns the cursor directly —
+    so `await collection.aggregate(...)` is correct in production and a
+    TypeError under test, and dropping the `await` is the reverse.
+
+    Normalising here means call sites are written once and neither convention
+    leaks into them. It's a seam that exists purely because the test double is
+    imperfect, which is worth saying out loud rather than dressing up.
+    """
+    cursor: Any = collection.aggregate(pipeline)
+    if inspect.isawaitable(cursor):
+        cursor = await cursor
+    return cursor  # type: ignore[no-any-return]
+
+
 async def ensure_indexes() -> None:
     """Index the fields every hot query filters on."""
     # Dedup lookups are always scoped to an owner, so index the pair.
@@ -97,6 +124,16 @@ async def ensure_indexes() -> None:
     await get_parse_cache_collection().create_index([("source", 1), ("created_at", 1)])
     # Spent rate-limit windows clean themselves up rather than growing forever.
     await get_rate_limit_collection().create_index("expires_at", expireAfterSeconds=0)
+    # Every metrics question is "this type, over this window", optionally for
+    # one owner — so the compound index leads with the two that always appear.
+    await get_events_collection().create_index([("type", 1), ("at", -1)])
+    await get_events_collection().create_index([("owner_id", 1), ("at", -1)])
+    # Raw events age out on their own. Aggregating into rollups first would be
+    # premature at this volume; the retention window is the knob to reach for
+    # if that changes (see `events_retention_days`).
+    await get_events_collection().create_index(
+        "at", expireAfterSeconds=get_settings().events_retention_days * 24 * 60 * 60
+    )
 
 
 async def backfill_source_hashes() -> int:

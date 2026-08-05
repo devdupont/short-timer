@@ -201,7 +201,7 @@ async def ensure_parsed(fingerprint: str, limit: int = CACHE_DAYS) -> int:
             continue
         title = str(doc.get("title") or "") or None
         try:
-            workout = await parse_workout_text(text, name_hint=title)
+            workout = await parse_workout_text(text, name_hint=title, purpose="prewarm:gym")
         except Exception:  # one bad day shouldn't stop the rest
             logger.exception("Could not pre-parse gym day %s", doc.get("date"))
             continue

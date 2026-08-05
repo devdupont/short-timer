@@ -88,7 +88,7 @@ async def test_oversized_paste_is_rejected_before_the_model(
 ) -> None:
     """A huge paste must not reach the model and run up a token bill."""
 
-    async def exploding_parse(text: str, name_hint: str | None = None) -> Workout:
+    async def exploding_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
         raise AssertionError("oversized input must be rejected before parsing")
 
     monkeypatch.setattr("short_timer.routers.workouts.parse_workout_text", exploding_parse)
@@ -124,7 +124,7 @@ async def test_upstream_failures_map_to_useful_statuses(
 ) -> None:
     """A parser outage should be a clear, retryable answer — not a bare 500."""
 
-    async def failing_parse(text: str, name_hint: str | None = None) -> Workout:
+    async def failing_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
         raise error
 
     monkeypatch.setattr("short_timer.routers.workouts.parse_workout_text", failing_parse)
@@ -143,7 +143,7 @@ async def test_upstream_failures_map_to_useful_statuses(
 async def test_unexpected_errors_do_not_leak_internals(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def boom(text: str, name_hint: str | None = None) -> Workout:
+    async def boom(text: str, name_hint: str | None = None, **_: object) -> Workout:
         raise RuntimeError("secret internal detail: connection string xyz")
 
     monkeypatch.setattr("short_timer.routers.workouts.parse_workout_text", boom)
@@ -182,7 +182,7 @@ async def test_unexpected_errors_still_carry_cors_headers(
     or registered after CORS in `app.py`.
     """
 
-    async def boom(text: str, name_hint: str | None = None) -> Workout:
+    async def boom(text: str, name_hint: str | None = None, **_: object) -> Workout:
         raise RuntimeError("kaboom")
 
     monkeypatch.setattr("short_timer.routers.workouts.parse_workout_text", boom)

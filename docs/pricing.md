@@ -25,7 +25,11 @@ what got pasted.
 
 At `claude-sonnet-5` list pricing ($3 / $15 per MTok):
 
-- **Typical parse: ~$0.016** (2,850 in + ~500 out)
+- **Typical parse: ~$0.013.** Measured, not estimated — a real three-round
+  chipper through the live API came back at **2,978 in / 265 out = $0.0129**.
+  The input matches the `count_tokens` figure above; the output is about half
+  what was first assumed, because a parsed workout is a compact tool call
+  rather than prose.
 - **Worst case: ~$0.054** (a maximum-length paste that fills `max_tokens`)
 
 Introductory pricing runs at $2/$10 through 2026-08-31, which makes a typical
@@ -72,10 +76,15 @@ where the money goes anyway.
 ## The gap: there is no budget ceiling
 
 The global limit is 500 calls/hour with **no daily or monthly cap**. Sustained
-at that ceiling, that's ~360,000 parses/month ≈ **$5,800/month**. The cap is a
-burst guard, not a budget; nothing in the system can say "stop, we've spent
-enough this month". That's the one control worth adding before opening signups,
-independent of whatever pricing lands.
+at that ceiling, that's ~360,000 parses/month ≈ **$4,600/month** at the measured
+per-parse cost. The cap is a burst guard, not a budget; nothing in the system
+can say "stop, we've spent enough this month". That's the one control worth
+adding before opening signups, independent of whatever pricing lands.
+
+Since 2026-08-05 the *actual* number is at least observable:
+`GET /api/metrics/operator` reports token totals and estimated spend per model
+over a window (see `docs/metrics.md`). A budget still has to be built; this at
+least means it can be set from data rather than guessed.
 
 ## The insight the tiers should be built on
 
