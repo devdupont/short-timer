@@ -81,22 +81,23 @@ has **never** fetched is the actionable case, and it's the one thing the app
 was previously unable to tell anyone. Both Wodify routes shipped without ever
 running against a live gym, so this is not a hypothetical.
 
-## Migrating stored config
+## Stored config has exactly one shape
 
-`UserConfig` still has `wodify_owner` and `wodify_member` fields. They exist to
-be migrated from: a `model_validator` folds them into `gyms` on every read and
-clears them, so no read path ever sees the old shape and there's no ordering
-dependency on a startup sweep having run.
+`gyms` is the only place a connection lives. There is deliberately no
+compatibility path back to the pre-provider `wodify_owner` / `wodify_member`
+fields: those were dropped outright rather than migrated, because the app had no
+users yet and the `users` collection was simply rebuilt.
 
-`db.backfill_gym_connections` persists what the validator already computes. It
-is the pattern to copy if a future change needs the same treatment — migrate in
-the model for correctness, sweep for tidiness — because it means the migration
-can't be half-applied.
+That is worth remembering the *next* time this comes up, because it won't be
+free again. Once there are accounts, the cheap options are gone and a schema
+change means either a migration or a compatibility window — so the trade to
+weigh is how long the old shape has to keep working, not whether it has to.
 
-The legacy fields also survive on `UserConfigView` and `UserConfigUpdate` as
-deprecated mirrors, so a browser holding a page loaded before providers shipped
-neither explodes on read nor 422s on save. Delete them once no client reads
-them.
+A change that does need migrating should migrate in the model (a
+`model_validator` folding the old shape into the new on read) rather than only
+in a startup sweep. That way no read path can observe the old shape, correctness
+doesn't depend on the sweep having run, and the sweep is left doing nothing but
+persisting what reads already compute.
 
 ## Checklist
 

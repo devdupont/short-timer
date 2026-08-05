@@ -81,7 +81,7 @@ async def test_seeding_is_idempotent() -> None:
 
 async def test_reseeding_does_not_clobber_existing_config(authed_client: AsyncClient) -> None:
     await authed_client.put(
-        "/api/me/config", json={"wodify_member": {"whiteboard_key": "wb-key-abcd1234"}}
+        "/api/me/config", json={"gyms": {"wodify_member": {"credential": "wb-key-abcd1234"}}}
     )
     await ensure_default_user()
     user = await get_user(DEFAULT_OWNER_ID)
@@ -111,50 +111,65 @@ async def test_me_requires_auth(client: AsyncClient) -> None:
     assert (await client.get("/api/me")).status_code == 401
 
 
+def _connection(config: dict, provider: str) -> dict | None:
+    """One provider's stored connection out of the config payload.
+
+    `gyms` is a list rather than a map because it only ever holds the providers
+    a user actually configured — an unconfigured one is absent, not an empty
+    entry — so reads go through here instead of indexing by key.
+    """
+    return next((gym for gym in config["gyms"] if gym["provider"] == provider), None)
+
+
 async def test_me_returns_empty_config_initially(authed_client: AsyncClient) -> None:
     response = await authed_client.get("/api/me")
     assert response.status_code == 200
     body = response.json()
     assert body["id"] == DEFAULT_OWNER_ID
     assert body["secrets_available"] is True
-    assert body["config"]["wodify_owner"]["api_key"] == {"is_set": False, "masked": None}
-    assert body["config"]["wodify_member"]["enabled"] is False
+    # No connections at all, rather than a set of blank ones.
+    assert body["config"]["gyms"] == []
 
 
 async def test_config_update_stores_and_masks_credential(authed_client: AsyncClient) -> None:
     response = await authed_client.put(
         "/api/me/config",
         json={
-            "wodify_owner": {
-                "api_key": "wodify-secret-key-9876",
-                "location": "Main",
-                "program": "CrossFit",
-                "enabled": True,
+            "gyms": {
+                "wodify_owner": {
+                    "credential": "wodify-secret-key-9876",
+                    "location": "Main",
+                    "program": "CrossFit",
+                    "enabled": True,
+                }
             }
         },
     )
     assert response.status_code == 200
-    owner = response.json()["config"]["wodify_owner"]
-    assert owner["api_key"] == {"is_set": True, "masked": "••••9876"}
+    owner = _connection(response.json()["config"], "wodify_owner")
+    assert owner is not None
+    assert owner["credential"] == {"is_set": True, "masked": "••••9876"}
     assert owner["location"] == "Main"
     assert owner["enabled"] is True
 
 
 async def test_credential_is_never_returned_in_full(authed_client: AsyncClient) -> None:
     secret = "wodify-secret-key-9876"
-    await authed_client.put("/api/me/config", json={"wodify_owner": {"api_key": secret}})
+    await authed_client.put(
+        "/api/me/config", json={"gyms": {"wodify_owner": {"credential": secret}}}
+    )
     response = await authed_client.get("/api/me")
     assert secret not in response.text
 
 
 async def test_credential_is_encrypted_at_rest(authed_client: AsyncClient) -> None:
     secret = "wodify-secret-key-9876"
-    await authed_client.put("/api/me/config", json={"wodify_owner": {"api_key": secret}})
+    await authed_client.put(
+        "/api/me/config", json={"gyms": {"wodify_owner": {"credential": secret}}}
+    )
 
     raw = await get_users_collection().find_one({"_id": DEFAULT_OWNER_ID})
     assert raw is not None
-    # Written through the deprecated `wodify_owner` alias above, but stored as
-    # a provider connection — so this also covers the alias still working.
     assert secret not in str(raw["config"])
     # …and the server can still read it back.
     user = await get_user(DEFAULT_OWNER_ID)
@@ -167,42 +182,93 @@ async def test_credential_is_encrypted_at_rest(authed_client: AsyncClient) -> No
 async def test_omitted_credential_is_left_alone(authed_client: AsyncClient) -> None:
     """Toggling `enabled` must not require re-entering the key."""
     await authed_client.put(
-        "/api/me/config", json={"wodify_owner": {"api_key": "wodify-secret-key-9876"}}
+        "/api/me/config",
+        json={"gyms": {"wodify_owner": {"credential": "wodify-secret-key-9876"}}},
     )
     response = await authed_client.put(
-        "/api/me/config", json={"wodify_owner": {"enabled": True, "location": "Downtown"}}
+        "/api/me/config",
+        json={"gyms": {"wodify_owner": {"enabled": True, "location": "Downtown"}}},
     )
-    owner = response.json()["config"]["wodify_owner"]
-    assert owner["api_key"]["is_set"] is True
-    assert owner["api_key"]["masked"] == "••••9876"
+    owner = _connection(response.json()["config"], "wodify_owner")
+    assert owner is not None
+    assert owner["credential"]["is_set"] is True
+    assert owner["credential"]["masked"] == "••••9876"
     assert owner["enabled"] is True
     assert owner["location"] == "Downtown"
 
 
 async def test_empty_string_clears_credential(authed_client: AsyncClient) -> None:
     await authed_client.put(
-        "/api/me/config", json={"wodify_owner": {"api_key": "wodify-secret-key-9876"}}
-    )
-    response = await authed_client.put("/api/me/config", json={"wodify_owner": {"api_key": ""}})
-    assert response.json()["config"]["wodify_owner"]["api_key"]["is_set"] is False
-
-
-async def test_untouched_section_is_preserved(authed_client: AsyncClient) -> None:
-    await authed_client.put(
-        "/api/me/config", json={"wodify_member": {"whiteboard_key": "wb-key-abcd1234"}}
+        "/api/me/config",
+        json={"gyms": {"wodify_owner": {"credential": "wodify-secret-key-9876"}}},
     )
     response = await authed_client.put(
-        "/api/me/config", json={"wodify_owner": {"location": "Main"}}
+        "/api/me/config", json={"gyms": {"wodify_owner": {"credential": ""}}}
+    )
+    # Clearing the last thing worth keeping drops the connection entirely,
+    # rather than leaving a husk the settings screen would call "connected".
+    assert _connection(response.json()["config"], "wodify_owner") is None
+
+
+async def test_clearing_a_credential_keeps_other_fields(authed_client: AsyncClient) -> None:
+    """A connection with settings left on it survives losing its key."""
+    await authed_client.put(
+        "/api/me/config",
+        json={"gyms": {"wodify_owner": {"credential": "key-1234", "location": "Main"}}},
+    )
+    response = await authed_client.put(
+        "/api/me/config", json={"gyms": {"wodify_owner": {"credential": ""}}}
+    )
+    owner = _connection(response.json()["config"], "wodify_owner")
+    assert owner is not None
+    assert owner["credential"]["is_set"] is False
+    assert owner["location"] == "Main"
+
+
+async def test_untouched_provider_is_preserved(authed_client: AsyncClient) -> None:
+    """Only the providers named in the request are touched."""
+    await authed_client.put(
+        "/api/me/config",
+        json={"gyms": {"wodify_member": {"credential": "wb-key-abcd1234"}}},
+    )
+    response = await authed_client.put(
+        "/api/me/config", json={"gyms": {"wodify_owner": {"location": "Main"}}}
     )
     config = response.json()["config"]
-    assert config["wodify_member"]["whiteboard_key"]["is_set"] is True
-    assert config["wodify_owner"]["location"] == "Main"
+    member = _connection(config, "wodify_member")
+    owner = _connection(config, "wodify_owner")
+    assert member is not None and member["credential"]["is_set"] is True
+    assert owner is not None and owner["location"] == "Main"
+
+
+async def test_several_providers_can_be_saved_at_once(authed_client: AsyncClient) -> None:
+    """The update is a map, so one request can configure two platforms."""
+    response = await authed_client.put(
+        "/api/me/config",
+        json={
+            "gyms": {
+                "wodify_member": {"credential": "wb-key-abcd1234", "enabled": True},
+                "sugarwod_owner": {"credential": "sugar-key-5678", "enabled": True},
+            }
+        },
+    )
+    config = response.json()["config"]
+    assert {gym["provider"] for gym in config["gyms"]} == {"wodify_member", "sugarwod_owner"}
+
+
+async def test_an_unknown_provider_is_rejected(authed_client: AsyncClient) -> None:
+    """The provider set is closed; a typo shouldn't silently store nothing."""
+    response = await authed_client.put(
+        "/api/me/config", json={"gyms": {"not_a_platform": {"credential": "x"}}}
+    )
+    assert response.status_code == 422
 
 
 async def test_config_is_scoped_to_the_session_user(authed_client: AsyncClient) -> None:
     """Another user's session must not see this user's credentials."""
     await authed_client.put(
-        "/api/me/config", json={"wodify_owner": {"api_key": "wodify-secret-key-9876"}}
+        "/api/me/config",
+        json={"gyms": {"wodify_owner": {"credential": "wodify-secret-key-9876"}}},
     )
     from short_timer.auth import SESSION_COOKIE_NAME
     from short_timer.models import User
@@ -217,7 +283,7 @@ async def test_config_is_scoped_to_the_session_user(authed_client: AsyncClient) 
     assert response.status_code == 200
     body = response.json()
     assert body["id"] == "someone-else"
-    assert body["config"]["wodify_owner"]["api_key"]["is_set"] is False
+    assert body["config"]["gyms"] == []
 
 
 async def test_saving_credential_without_keys_reports_unavailable(
@@ -228,7 +294,8 @@ async def test_saving_credential_without_keys_reports_unavailable(
     crypto._cipher.cache_clear()
 
     response = await authed_client.put(
-        "/api/me/config", json={"wodify_owner": {"api_key": "wodify-secret-key-9876"}}
+        "/api/me/config",
+        json={"gyms": {"wodify_owner": {"credential": "wodify-secret-key-9876"}}},
     )
     assert response.status_code == 503
     assert (await authed_client.get("/api/me")).json()["secrets_available"] is False
@@ -243,7 +310,8 @@ async def test_non_credential_fields_save_without_keys(
     crypto._cipher.cache_clear()
 
     response = await authed_client.put(
-        "/api/me/config", json={"wodify_owner": {"location": "Main", "enabled": True}}
+        "/api/me/config", json={"gyms": {"wodify_owner": {"location": "Main", "enabled": True}}}
     )
     assert response.status_code == 200
-    assert response.json()["config"]["wodify_owner"]["location"] == "Main"
+    owner = _connection(response.json()["config"], "wodify_owner")
+    assert owner is not None and owner["location"] == "Main"

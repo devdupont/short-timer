@@ -119,48 +119,6 @@ async def backfill_source_hashes() -> int:
     return updated
 
 
-async def backfill_gym_connections() -> int:
-    """Persist the legacy-Wodify-config migration `UserConfig` does on read.
-
-    `UserConfig._fold_legacy_gyms` already moves `wodify_owner`/`wodify_member`
-    into `gyms` every time a user is loaded, so correctness does not depend on
-    this running — it exists so the *stored* documents converge on one shape
-    instead of being re-migrated forever, and so the legacy fields can
-    eventually be deleted from the model without a data question attached.
-
-    Idempotent, and safe to run against documents already migrated: a user whose
-    config round-trips unchanged is skipped.
-    """
-    from short_timer.models import User
-
-    collection = get_users_collection()
-    migrated = 0
-    async for doc in collection.find({}):
-        config = (doc.get("config") or {}) if isinstance(doc.get("config"), dict) else {}
-        # Only a *credential* sitting in a legacy slot is worth a write. The
-        # legacy keys themselves survive every dump as all-None objects, so
-        # testing for their presence would re-migrate every user on every boot.
-        owner = config.get("wodify_owner") or {}
-        member = config.get("wodify_member") or {}
-        if not owner.get("api_key") and not member.get("whiteboard_key"):
-            continue
-        data = dict(doc)
-        data["id"] = data.pop("_id")
-        try:
-            user = User(**data)
-        except Exception:  # a malformed user shouldn't stop the sweep
-            logger.exception("Skipping unreadable user document during gym-config migration.")
-            continue
-        await collection.update_one(
-            {"_id": user.id}, {"$set": {"config": user.config.model_dump(mode="json")}}
-        )
-        migrated += 1
-
-    if migrated:
-        logger.info("Migrated gym config on %d user(s) into provider connections.", migrated)
-    return migrated
-
-
 async def backfill_owner_ids() -> int:
     """Assign pre-tenancy workouts to the default owner.
 

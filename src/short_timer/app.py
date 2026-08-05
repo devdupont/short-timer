@@ -10,7 +10,6 @@ from fastapi.responses import JSONResponse
 from short_timer import concept2_cache, hybrid_cache
 from short_timer.config import get_settings
 from short_timer.db import (
-    backfill_gym_connections,
     backfill_owner_ids,
     backfill_source_hashes,
     ensure_indexes,
@@ -131,17 +130,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         owners = await backfill_owner_ids()
         moved = await migrate_wod_parses()
         labelled = await backfill_parse_sources()
-        gyms = await backfill_gym_connections()
-        if hashes or owners or moved or labelled or gyms:
+        if hashes or owners or moved or labelled:
             logger.info(
                 "Backfilled source_hash on %d workout(s), owner_id on %d, moved %d "
-                "WOD parse(s) into the shared pool, labelled %d for retention, "
-                "migrated gym config on %d user(s).",
+                "WOD parse(s) into the shared pool, labelled %d for retention.",
                 hashes,
                 owners,
                 moved,
                 labelled,
-                gyms,
             )
     except Exception:  # startup maintenance is non-critical
         logger.exception("Skipped startup database maintenance.")

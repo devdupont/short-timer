@@ -29,8 +29,6 @@ from short_timer.models import (
     UserConfig,
     UserConfigUpdate,
     UserConfigView,
-    WodifyMemberConfigView,
-    WodifyOwnerConfigView,
     normalize_feeds,
 )
 
@@ -94,27 +92,11 @@ def _connection_view(connection: GymConnection) -> GymConnectionView:
 
 def to_view(config: UserConfig) -> UserConfigView:
     """Config with every credential reduced to set/not-set plus a mask."""
-    gyms = [_connection_view(connection) for connection in config.gyms]
-    member = config.connection(GymProvider.WODIFY_MEMBER)
-    owner = config.connection(GymProvider.WODIFY_OWNER)
     return UserConfigView(
-        gyms=gyms,
+        gyms=[_connection_view(connection) for connection in config.gyms],
         # Normalized on the way out so a record written before a feed kind
         # existed still reports a complete list.
         feeds=normalize_feeds(config.feeds),
-        # Deprecated mirrors of the two Wodify providers — see UserConfigView.
-        wodify_owner=WodifyOwnerConfigView(
-            api_key=_status(owner.credential) if owner else _status(None),
-            location=owner.location if owner else None,
-            program=owner.program if owner else None,
-            enabled=bool(owner and owner.enabled),
-        ),
-        wodify_member=WodifyMemberConfigView(
-            whiteboard_key=_status(member.credential) if member else _status(None),
-            location=member.location if member else None,
-            program=member.program if member else None,
-            enabled=bool(member and member.enabled),
-        ),
     )
 
 
@@ -178,29 +160,6 @@ async def update_config(user: User, update: UserConfigUpdate) -> User:
     """Merge a partial config change into the user's stored config."""
     config = user.config.model_copy(deep=True)
 
-    # Deprecated aliases first, so a request carrying both has `gyms` win.
-    if update.wodify_member is not None:
-        _apply_connection(
-            config,
-            GymProvider.WODIFY_MEMBER,
-            GymConnectionUpdate(
-                credential=update.wodify_member.whiteboard_key,
-                location=update.wodify_member.location,
-                program=update.wodify_member.program,
-                enabled=update.wodify_member.enabled,
-            ),
-        )
-    if update.wodify_owner is not None:
-        _apply_connection(
-            config,
-            GymProvider.WODIFY_OWNER,
-            GymConnectionUpdate(
-                credential=update.wodify_owner.api_key,
-                location=update.wodify_owner.location,
-                program=update.wodify_owner.program,
-                enabled=update.wodify_owner.enabled,
-            ),
-        )
     if update.gyms is not None:
         for provider, connection_update in update.gyms.items():
             _apply_connection(config, provider, connection_update)

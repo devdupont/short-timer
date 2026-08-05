@@ -222,42 +222,6 @@ class LoginRequest(BaseModel):
 # belongs to a user rather than to the environment.
 
 
-class WodifyOwnerConfig(BaseModel):
-    """Wodify Program API access, for someone who runs the gym.
-
-    The API key is minted by a gym admin in Wodify and grants access to that
-    gym's programming, so it's a credential and never leaves the server in the
-    clear — see `UserConfigView` for what a client actually receives.
-    """
-
-    api_key: SecretBox | None = None
-    location: str | None = Field(default=None, max_length=200)
-    program: str | None = Field(default=None, max_length=200)
-    enabled: bool = False
-
-    def is_usable(self) -> bool:
-        """Whether this is complete enough to fetch with."""
-        return bool(self.enabled and self.api_key and self.location and self.program)
-
-
-class WodifyMemberConfig(BaseModel):
-    """Wodify public whiteboard access, for a member of the gym.
-
-    The whiteboard key only works if the gym enabled public publishing, and it
-    appears in a URL the gym hands out — so it's far less sensitive than an API
-    key. It's still encrypted: it identifies the user's gym, and treating every
-    third-party credential the same way is one less exception to reason about.
-    """
-
-    whiteboard_key: SecretBox | None = None
-    location: str | None = Field(default=None, max_length=200)
-    program: str | None = Field(default=None, max_length=200)
-    enabled: bool = False
-
-    def is_usable(self) -> bool:
-        return bool(self.enabled and self.whiteboard_key)
-
-
 # --- Gym providers -----------------------------------------------------------
 # A gym's programming lives on whichever platform the gym pays for, reached by
 # a route that differs by whether you run the gym or attend it. Those two axes
@@ -375,7 +339,7 @@ DEFAULT_ENABLED_FEEDS: frozenset[FeedKind] = frozenset({FeedKind.GYM, FeedKind.C
 class FeedPref(BaseModel):
     """Whether a feed appears on the home page.
 
-    Distinct from the `enabled` flag on a Wodify config, which selects *which
+    Distinct from the `enabled` flag on a `GymConnection`, which selects *which
     credential route* to fetch a gym with. This one is purely presentational:
     it decides what the home page renders, and position in the list is the
     display order.
@@ -418,65 +382,8 @@ def normalize_feeds(feeds: list[FeedPref]) -> list[FeedPref]:
 class UserConfig(BaseModel):
     """Everything a user configures about their own account."""
 
-    #: Pre-provider storage, kept so a document written before `gyms` existed
-    #: still validates. Folded into `gyms` by the validator below and cleared,
-    #: so nothing downstream reads these — they exist to be migrated from.
-    wodify_owner: WodifyOwnerConfig = Field(default_factory=WodifyOwnerConfig)
-    wodify_member: WodifyMemberConfig = Field(default_factory=WodifyMemberConfig)
     gyms: list[GymConnection] = Field(default_factory=list)
     feeds: list[FeedPref] = Field(default_factory=default_feeds)
-
-    @model_validator(mode="after")
-    def _fold_legacy_gyms(self) -> UserConfig:
-        """Move pre-provider Wodify config into `gyms`, once, on read.
-
-        Migrating in the model rather than in a startup sweep means there is
-        no window where some read paths see the old shape and some the new,
-        and no ordering dependency on the sweep having run. The sweep in
-        `db.backfill_gym_connections` still exists, but only to *persist* what
-        this already computes — correctness doesn't depend on it.
-
-        Idempotent: a provider already present in `gyms` wins, so a user who
-        has since edited their connection doesn't get the stale legacy copy
-        written back over it.
-        """
-        configured = {connection.provider for connection in self.gyms}
-        legacy: list[tuple[GymProvider, SecretBox | None, str | None, str | None, bool]] = [
-            (
-                GymProvider.WODIFY_MEMBER,
-                self.wodify_member.whiteboard_key,
-                self.wodify_member.location,
-                self.wodify_member.program,
-                self.wodify_member.enabled,
-            ),
-            (
-                GymProvider.WODIFY_OWNER,
-                self.wodify_owner.api_key,
-                self.wodify_owner.location,
-                self.wodify_owner.program,
-                self.wodify_owner.enabled,
-            ),
-        ]
-        for provider, credential, location, program, enabled in legacy:
-            # Nothing stored means nothing to migrate — don't manufacture an
-            # empty connection for a route the user never touched.
-            if provider in configured or credential is None:
-                continue
-            self.gyms.append(
-                GymConnection(
-                    provider=provider,
-                    credential=credential,
-                    location=location,
-                    program=program,
-                    enabled=enabled,
-                )
-            )
-
-        # Cleared so there is exactly one place a connection can live. The next
-        # write persists the migration; until then it happens on every read.
-        self.wodify_owner = WodifyOwnerConfig()
-        self.wodify_member = WodifyMemberConfig()
-        return self
 
     def connection(self, provider: GymProvider) -> GymConnection | None:
         return next((c for c in self.gyms if c.provider == provider), None)
@@ -498,20 +405,6 @@ class User(BaseModel):
 # that, rather than remembering to strip fields at each call site.
 
 
-class WodifyOwnerConfigView(BaseModel):
-    api_key: SecretStatus = Field(default_factory=SecretStatus)
-    location: str | None = None
-    program: str | None = None
-    enabled: bool = False
-
-
-class WodifyMemberConfigView(BaseModel):
-    whiteboard_key: SecretStatus = Field(default_factory=SecretStatus)
-    location: str | None = None
-    program: str | None = None
-    enabled: bool = False
-
-
 class GymConnectionView(BaseModel):
     """One stored connection, with its credential reduced to set/not-set."""
 
@@ -531,12 +424,6 @@ class UserConfigView(BaseModel):
 
     gyms: list[GymConnectionView] = Field(default_factory=list)
     feeds: list[FeedPref] = Field(default_factory=default_feeds)
-    #: Deprecated, and populated only from the two Wodify entries in `gyms`.
-    #: A browser holding a page loaded before providers shipped still reads
-    #: these, and a config screen that explodes on deploy is a worse bug than
-    #: two fields nobody new should use. Remove once no client reads them.
-    wodify_owner: WodifyOwnerConfigView = Field(default_factory=WodifyOwnerConfigView)
-    wodify_member: WodifyMemberConfigView = Field(default_factory=WodifyMemberConfigView)
 
 
 class MeResponse(BaseModel):
@@ -548,33 +435,12 @@ class MeResponse(BaseModel):
     secrets_available: bool = True
 
 
-class WodifyOwnerConfigUpdate(BaseModel):
-    """A requested change. Every field is optional: omitted means "leave it".
-
-    `api_key` distinguishes three cases — absent leaves the stored key alone
-    (so the UI can save other fields without re-entering it), empty string
-    clears it, and a value replaces it.
-    """
-
-    api_key: str | None = Field(default=None, max_length=500)
-    location: str | None = Field(default=None, max_length=200)
-    program: str | None = Field(default=None, max_length=200)
-    enabled: bool | None = None
-
-
-class WodifyMemberConfigUpdate(BaseModel):
-    whiteboard_key: str | None = Field(default=None, max_length=500)
-    location: str | None = Field(default=None, max_length=200)
-    program: str | None = Field(default=None, max_length=200)
-    enabled: bool | None = None
-
-
 class GymConnectionUpdate(BaseModel):
     """A requested change to one gym connection.
 
-    `credential` follows the same three-way rule the Wodify updates did:
-    absent leaves the stored value alone (so the UI can fix a typo'd location
-    without re-entering the key), empty string clears it, a value replaces it.
+    `credential` is three-way: absent leaves the stored value alone (so the UI
+    can fix a typo'd location without re-entering the key), an empty string
+    clears it, and anything else replaces it.
     """
 
     credential: str | None = Field(default=None, max_length=500)
@@ -589,12 +455,6 @@ class UserConfigUpdate(BaseModel):
     #: here isn't user-facing, so there's nothing to be gained by paying it.
     #: Only the providers named are touched; the rest are left alone.
     gyms: dict[GymProvider, GymConnectionUpdate] | None = None
-    #: Deprecated aliases for the two Wodify providers, kept for the same
-    #: reason as their counterparts on `UserConfigView`: a stale browser tab
-    #: shouldn't get a 422 when it saves. Applied before `gyms`, so a request
-    #: that somehow sends both has the current field win.
-    wodify_owner: WodifyOwnerConfigUpdate | None = None
-    wodify_member: WodifyMemberConfigUpdate | None = None
     #: Replaced wholesale rather than merged, because position *is* the display
     #: order — there's no unambiguous way to merge one entry into an ordered
     #: list. Absent still means "leave it alone". Bounded by the number of

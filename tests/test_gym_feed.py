@@ -71,18 +71,27 @@ async def authed_client(client: AsyncClient) -> AsyncClient:
     return client
 
 
-async def _configure_member(user_id: str = DEFAULT_OWNER_ID, key: str = "wb-key-1234") -> None:
+async def _configure(
+    provider: GymProvider,
+    user_id: str = DEFAULT_OWNER_ID,
+    key: str = "wb-key-1234",
+    **fields: object,
+) -> None:
+    """Store one gym connection, bypassing the API so tests can set any shape."""
     await ensure_default_user()
+    connection = {
+        "provider": provider.value,
+        "credential": encrypt(key).model_dump(mode="json"),
+        "enabled": True,
+        **fields,
+    }
     await get_users_collection().update_one(
-        {"_id": user_id},
-        {
-            "$set": {
-                "config.wodify_member.whiteboard_key": encrypt(key).model_dump(mode="json"),
-                "config.wodify_member.enabled": True,
-            }
-        },
-        upsert=True,
+        {"_id": user_id}, {"$set": {"config.gyms": [connection]}}, upsert=True
     )
+
+
+async def _configure_member(user_id: str = DEFAULT_OWNER_ID, key: str = "wb-key-1234") -> None:
+    await _configure(GymProvider.WODIFY_MEMBER, user_id=user_id, key=key)
 
 
 # --- Resolving configuration -------------------------------------------------
@@ -99,7 +108,7 @@ async def test_disabled_config_resolves_to_nothing() -> None:
     """A saved key that's switched off must not be fetched."""
     await _configure_member()
     await get_users_collection().update_one(
-        {"_id": DEFAULT_OWNER_ID}, {"$set": {"config.wodify_member.enabled": False}}
+        {"_id": DEFAULT_OWNER_ID}, {"$set": {"config.gyms.0.enabled": False}}
     )
     user = await get_user(DEFAULT_OWNER_ID)
     assert user is not None
@@ -107,15 +116,27 @@ async def test_disabled_config_resolves_to_nothing() -> None:
 
 
 async def test_member_route_wins_when_both_configured() -> None:
-    await _configure_member()
+    """PROVIDER_PRIORITY decides, not which connection was stored first."""
+    await ensure_default_user()
     await get_users_collection().update_one(
         {"_id": DEFAULT_OWNER_ID},
         {
             "$set": {
-                "config.wodify_owner.api_key": encrypt("api-key-9999").model_dump(mode="json"),
-                "config.wodify_owner.location": "Main",
-                "config.wodify_owner.program": "CrossFit",
-                "config.wodify_owner.enabled": True,
+                "config.gyms": [
+                    # Owner first in storage order, to prove order doesn't decide.
+                    {
+                        "provider": GymProvider.WODIFY_OWNER.value,
+                        "credential": encrypt("api-key-9999").model_dump(mode="json"),
+                        "location": "Main",
+                        "program": "CrossFit",
+                        "enabled": True,
+                    },
+                    {
+                        "provider": GymProvider.WODIFY_MEMBER.value,
+                        "credential": encrypt("wb-key-1234").model_dump(mode="json"),
+                        "enabled": True,
+                    },
+                ]
             }
         },
     )
@@ -276,76 +297,6 @@ async def test_feed_is_scoped_to_the_session_user(authed_client: AsyncClient) ->
     assert response.json() == {"configured": False, "wods": []}
 
 
-# --- Migrating pre-provider config -------------------------------------------
-
-
-async def test_legacy_wodify_config_becomes_a_provider_connection() -> None:
-    """Documents written before providers existed must keep working.
-
-    `_configure_member` writes the old `config.wodify_member.*` shape straight
-    into Mongo, which is exactly what a real pre-migration document looks like.
-    """
-    await _configure_member(key="legacy-key-1234")
-    user = await get_user(DEFAULT_OWNER_ID)
-    assert user is not None
-
-    connection = user.config.connection(GymProvider.WODIFY_MEMBER)
-    assert connection is not None
-    assert connection.enabled is True
-    assert crypto.decrypt(connection.credential) == "legacy-key-1234"
-    # And the feed still resolves off it.
-    source = resolve_source(user)
-    assert source is not None and source.provider is GymProvider.WODIFY_MEMBER
-
-
-async def test_migration_does_not_overwrite_an_edited_connection() -> None:
-    """A user who has since re-saved shouldn't get the stale copy back."""
-    await _configure_member(key="old-key-1234")
-    await get_users_collection().update_one(
-        {"_id": DEFAULT_OWNER_ID},
-        {
-            "$set": {
-                "config.gyms": [
-                    {
-                        "provider": GymProvider.WODIFY_MEMBER.value,
-                        "credential": encrypt("new-key-5678").model_dump(mode="json"),
-                        "enabled": True,
-                    }
-                ]
-            }
-        },
-    )
-    user = await get_user(DEFAULT_OWNER_ID)
-    assert user is not None
-    connection = user.config.connection(GymProvider.WODIFY_MEMBER)
-    assert connection is not None
-    assert crypto.decrypt(connection.credential) == "new-key-5678"
-
-
-async def test_the_startup_sweep_persists_the_migration() -> None:
-    """Reads migrate every time; the sweep is what makes it stick."""
-    from short_timer.db import backfill_gym_connections
-
-    await _configure_member(key="legacy-key-1234")
-    assert await backfill_gym_connections() == 1
-
-    raw = await get_users_collection().find_one({"_id": DEFAULT_OWNER_ID})
-    assert raw is not None
-    assert len(raw["config"]["gyms"]) == 1
-    assert raw["config"]["wodify_member"]["whiteboard_key"] is None
-    # Idempotent: nothing left to migrate on a second pass.
-    assert await backfill_gym_connections() == 0
-
-
-async def test_a_user_who_never_connected_a_gym_is_not_touched() -> None:
-    from short_timer.db import backfill_gym_connections
-
-    await ensure_default_user()
-    assert await backfill_gym_connections() == 0
-    user = await get_user(DEFAULT_OWNER_ID)
-    assert user is not None and user.config.gyms == []
-
-
 # --- The source registry over the wire ---------------------------------------
 
 
@@ -416,21 +367,7 @@ async def test_a_sugarwod_gym_feeds_the_home_page(authed_client: AsyncClient) ->
             },
         )
     )
-    await ensure_default_user()
-    await get_users_collection().update_one(
-        {"_id": DEFAULT_OWNER_ID},
-        {
-            "$set": {
-                "config.gyms": [
-                    {
-                        "provider": GymProvider.SUGARWOD_OWNER.value,
-                        "credential": encrypt("sugar-key-1234").model_dump(mode="json"),
-                        "enabled": True,
-                    }
-                ]
-            }
-        },
-    )
+    await _configure(GymProvider.SUGARWOD_OWNER, key="sugar-key-1234")
 
     response = await authed_client.get("/api/gym/wods?days=7")
     assert response.status_code == 200
@@ -492,8 +429,7 @@ async def test_config_payload_matches_the_frontend_interface(
     """Keys must match `UserConfig` / `GymConnection` in web/src/types.ts."""
     await _configure_member()
     config = (await authed_client.get("/api/me")).json()["config"]
-    # The two Wodify keys are the deprecated mirrors; the frontend reads `gyms`.
-    assert {"gyms", "feeds"} <= set(config)
+    assert set(config) == {"gyms", "feeds"}
     [connection] = config["gyms"]
     assert set(connection) == {"provider", "credential", "location", "program", "enabled"}
     assert set(connection["credential"]) == {"is_set", "masked"}
