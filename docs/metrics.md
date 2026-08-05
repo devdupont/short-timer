@@ -60,6 +60,11 @@ the Anthropic bill to anyone who knows the passcode. It returns 404 rather than
 403 to a caller who isn't on the list — an endpoint you may not read shouldn't
 confirm it exists.
 
+That allowlist is a placeholder for a `role` field on `User`, which is what
+should gate this once accounts exist. See *Roles on the user record* in
+`docs/roadmap.md` for the roles needed, the single function that changes, and
+why a gym owner doesn't fit on the same axis as an admin.
+
 ## Retention and scale
 
 Raw events, one document each, aged out by a TTL index at
