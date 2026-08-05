@@ -15,7 +15,6 @@ from pymongo import AsyncMongoClient
 from pymongo.asynchronous.collection import AsyncCollection
 from pymongo.asynchronous.database import AsyncDatabase
 
-from short_timer.auth import DEFAULT_OWNER_ID
 from short_timer.config import get_settings
 from short_timer.dedup import source_hash
 
@@ -76,6 +75,15 @@ def get_users_collection() -> AsyncCollection[dict[str, Any]]:
     return get_database()["users"]
 
 
+def get_sessions_collection() -> AsyncCollection[dict[str, Any]]:
+    """Live sessions, keyed by the SHA-256 of the token (see sessions.py).
+
+    The token itself is never stored, so a dump of this collection can't be
+    replayed against the API.
+    """
+    return get_database()["sessions"]
+
+
 def get_rate_limit_collection() -> AsyncCollection[dict[str, Any]]:
     """Rate-limit counters, one document per (scope, subject, window)."""
     return get_database()["rate_limits"]
@@ -124,6 +132,17 @@ async def ensure_indexes() -> None:
     await get_parse_cache_collection().create_index([("source", 1), ("created_at", 1)])
     # Spent rate-limit windows clean themselves up rather than growing forever.
     await get_rate_limit_collection().create_index("expires_at", expireAfterSeconds=0)
+    # One account per address. Sparse, because the shared-passcode account has
+    # no email and two documents with a missing field would otherwise collide
+    # on a plain unique index.
+    await get_users_collection().create_index("email", unique=True, sparse=True)
+    # "End every session for this user" is a delete by user_id, and it runs on
+    # every password reset.
+    await get_sessions_collection().create_index("user_id")
+    # Expired sessions are already rejected and deleted on read (see
+    # sessions.py). This index is only the janitor for tokens nobody ever
+    # presents again — it is not the expiry check.
+    await get_sessions_collection().create_index("expires_at", expireAfterSeconds=0)
     # Every metrics question is "this type, over this window", optionally for
     # one owner — so the compound index leads with the two that always appear.
     await get_events_collection().create_index([("type", 1), ("at", -1)])
@@ -156,13 +175,17 @@ async def backfill_source_hashes() -> int:
     return updated
 
 
-async def backfill_owner_ids() -> int:
+async def backfill_owner_ids(default_owner_id: str) -> int:
     """Assign pre-tenancy workouts to the default owner.
 
     Rows written before `owner_id` existed would otherwise be invisible to
     every owner-scoped query — effectively vanishing from the library.
+
+    The owner is passed in rather than imported: this module sits *below*
+    `auth`, which now reaches the database itself to resolve sessions, so
+    importing the constant from there would close an import cycle.
     """
     result = await get_workouts_collection().update_many(
-        {"owner_id": None}, {"$set": {"owner_id": DEFAULT_OWNER_ID}}
+        {"owner_id": None}, {"$set": {"owner_id": default_owner_id}}
     )
     return int(result.modified_count)

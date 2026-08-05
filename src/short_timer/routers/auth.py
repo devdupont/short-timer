@@ -1,12 +1,12 @@
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from short_timer.auth import (
     DEFAULT_OWNER_ID,
-    SESSION_COOKIE_NAME,
     check_passcode,
-    create_session_token,
+    end_session,
+    session_token,
+    start_session,
 )
-from short_timer.config import get_settings
 from short_timer.metrics import record_login
 from short_timer.models import LoginRequest
 from short_timer.ratelimit import client_ip, enforce, login_limit, peek
@@ -30,22 +30,14 @@ async def login(body: LoginRequest, request: Request, response: Response) -> Non
 
     # The passcode is how you authenticate *as the default user*; the session
     # carries that id so tenancy has a real account behind it. A second login
-    # method later mints a token for a different user, and nothing downstream
-    # needs to change.
+    # method later mints a session for a different user, and nothing
+    # downstream needs to change.
     await ensure_default_user()
     await record_login(owner_id=DEFAULT_OWNER_ID)
-
-    settings = get_settings()
-    response.set_cookie(
-        key=SESSION_COOKIE_NAME,
-        value=create_session_token(DEFAULT_OWNER_ID),
-        max_age=settings.session_max_age_seconds,
-        httponly=True,
-        samesite="lax",
-        secure=settings.session_cookie_secure,
-    )
+    await start_session(response, request, DEFAULT_OWNER_ID)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-async def logout(response: Response) -> None:
-    response.delete_cookie(SESSION_COOKIE_NAME)
+async def logout(response: Response, token: str | None = Depends(session_token)) -> None:
+    """End this session. Unlike the signed cookie it replaces, this is real."""
+    await end_session(response, token)

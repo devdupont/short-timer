@@ -7,7 +7,7 @@ from httpx import ASGITransport, AsyncClient
 
 from short_timer import crypto
 from short_timer.app import app
-from short_timer.auth import DEFAULT_OWNER_ID, SESSION_COOKIE_NAME, create_session_token
+from short_timer.auth import DEFAULT_OWNER_ID
 from short_timer.config import get_settings
 from short_timer.crypto import encrypt, generate_key
 from short_timer.db import (
@@ -284,7 +284,7 @@ async def test_refresh_skips_users_without_a_gym() -> None:
     assert await refresh_all_configured() == 0
 
 
-async def test_feed_is_scoped_to_the_session_user(authed_client: AsyncClient) -> None:
+async def test_feed_is_scoped_to_the_session_user(authed_client: AsyncClient, sign_in_as) -> None:
     """Another user's session must not inherit this user's gym."""
     await _configure_member()
     other = User(id="stranger")
@@ -292,7 +292,7 @@ async def test_feed_is_scoped_to_the_session_user(authed_client: AsyncClient) ->
     doc["_id"] = doc.pop("id")
     await get_users_collection().insert_one(doc)
 
-    authed_client.cookies.set(SESSION_COOKIE_NAME, create_session_token("stranger"))
+    await sign_in_as(authed_client, "stranger")
     response = await authed_client.get("/api/gym/wods")
     assert response.json() == {"configured": False, "wods": []}
 

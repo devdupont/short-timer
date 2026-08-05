@@ -20,7 +20,8 @@ whenever it's wanted.
 
 from __future__ import annotations
 
-from typing import Any
+import logging
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
@@ -34,6 +35,10 @@ from short_timer.metrics import (
     model_spend,
     parse_breakdown,
 )
+from short_timer.models import OPERATOR_ROLES, User
+from short_timer.users import current_user
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/metrics", tags=["metrics"], dependencies=[Depends(require_session)])
 
@@ -102,13 +107,24 @@ def _usage(breakdown: dict[str, int]) -> ParseUsage:
     )
 
 
-async def _require_operator(owner_id: str = Depends(current_owner)) -> str:
-    admins = get_settings().metrics_admin_user_ids
-    if not admins or owner_id not in admins:
-        # 404 rather than 403: an endpoint the caller may not use shouldn't
-        # confirm it exists, and this one names what the deployment spends.
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-    return owner_id
+async def _require_operator(user: Annotated[User, Depends(current_user)]) -> str:
+    """Gate on the caller's role, with the env allowlist as a break-glass.
+
+    The role on the user record is the mechanism. `METRICS_ADMIN_USER_IDS`
+    stays as a fallback because a role stored in the database is unreadable in
+    exactly the situation you most want metrics — the database is sick, or a
+    bad write put the wrong roles in. An env var that still works when the
+    `users` collection doesn't is cheap insurance, provided it's clearly the
+    fallback and not the mechanism.
+    """
+    if user.role in OPERATOR_ROLES:
+        return user.id
+    if user.id in get_settings().metrics_admin_user_ids:
+        logger.warning("Operator metrics reached via the env allowlist, not a role.")
+        return user.id
+    # 404 rather than 403: an endpoint the caller may not use shouldn't
+    # confirm it exists, and this one names what the deployment spends.
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
 
 @router.get("/me", response_model=MeMetrics)

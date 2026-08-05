@@ -12,17 +12,22 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     app_passcode: str = Field(..., description="Shared passcode required to use the app.")
-    session_secret: str = Field(..., description="Secret used to sign session cookies.")
-    session_max_age_seconds: int = 60 * 60 * 24 * 30
     session_cookie_secure: bool = Field(
         default=True, description="Set false only for plain-http local dev/tests."
     )
+    #: Two clocks bound a session (see sessions.py). The idle deadline slides
+    #: forward as the session is used; the absolute one never moves. Both are
+    #: deliberately long — this is a timer opened at a gym, and signing someone
+    #: out mid-workout costs more than the risk it avoids, now that sessions
+    #: can actually be revoked.
+    session_idle_seconds: int = 60 * 60 * 24 * 30
+    session_absolute_seconds: int = 60 * 60 * 24 * 180
 
     # Keys encrypting per-user third-party credentials, newest first — the
     # first is used for new writes, the rest only to read values written
     # before the last rotation. Same NoDecode treatment as cors_origins.
-    # Deliberately not derived from session_secret: rotating the cookie secret
-    # must not render every stored credential unreadable. Empty is valid and
+    # Deliberately independent of anything session-related: rotating session
+    # config must not render every stored credential unreadable. Empty is valid and
     # simply disables credential storage (see crypto.is_configured).
     secrets_keys: Annotated[list[str], NoDecode] = Field(default_factory=list)
 

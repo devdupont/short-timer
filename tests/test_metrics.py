@@ -8,7 +8,11 @@ from httpx import ASGITransport, AsyncClient
 from short_timer.app import app
 from short_timer.auth import DEFAULT_OWNER_ID
 from short_timer.config import get_settings
-from short_timer.db import get_events_collection, get_workouts_collection
+from short_timer.db import (
+    get_events_collection,
+    get_users_collection,
+    get_workouts_collection,
+)
 from short_timer.metrics import (
     MODEL_PRICES,
     EventType,
@@ -20,7 +24,8 @@ from short_timer.metrics import (
     record_model_call,
     record_parse,
 )
-from short_timer.models import Workout, WorkoutMode
+from short_timer.models import Role, Workout, WorkoutMode
+from short_timer.users import get_user
 
 
 @pytest.fixture
@@ -226,6 +231,43 @@ async def test_a_non_allowlisted_user_gets_404_not_403(
     monkeypatch.setenv("METRICS_ADMIN_USER_IDS", "somebody-else")
     get_settings.cache_clear()
     assert (await authed_client.get("/api/metrics/operator")).status_code == 404
+
+
+async def _set_role(user_id: str, role: str) -> None:
+    await get_users_collection().update_one({"_id": user_id}, {"$set": {"role": role}})
+
+
+async def test_operator_metrics_open_for_an_admin_role(authed_client: AsyncClient) -> None:
+    """The role on the record is the mechanism, with no env var set."""
+    await _set_role(DEFAULT_OWNER_ID, "admin")
+    assert (await authed_client.get("/api/metrics/operator")).status_code == 200
+
+
+async def test_operator_metrics_open_for_staff(authed_client: AsyncClient) -> None:
+    """Support needs the privileged metrics without being the account owner."""
+    await _set_role(DEFAULT_OWNER_ID, "staff")
+    assert (await authed_client.get("/api/metrics/operator")).status_code == 200
+
+
+async def test_plain_user_role_is_refused(authed_client: AsyncClient) -> None:
+    await _set_role(DEFAULT_OWNER_ID, "user")
+    assert (await authed_client.get("/api/metrics/operator")).status_code == 404
+
+
+async def test_the_seeded_passcode_user_is_not_privileged(authed_client: AsyncClient) -> None:
+    """Everyone shares the passcode account, so it must not read the bill."""
+    user = await get_user(DEFAULT_OWNER_ID)
+    assert user is not None
+    assert user.role is Role.USER
+    assert (await authed_client.get("/api/metrics/operator")).status_code == 404
+
+
+async def test_a_disabled_account_is_refused_everywhere(authed_client: AsyncClient) -> None:
+    """Status is a separate axis from role: an admin who is disabled is out."""
+    await get_users_collection().update_one(
+        {"_id": DEFAULT_OWNER_ID}, {"$set": {"role": "admin", "status": "disabled"}}
+    )
+    assert (await authed_client.get("/api/metrics/operator")).status_code == 403
 
 
 async def test_the_window_is_bounded(authed_client: AsyncClient) -> None:

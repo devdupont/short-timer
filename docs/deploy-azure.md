@@ -71,7 +71,6 @@ az containerapp secret set \
   --secrets \
     mongodb-uri="mongodb+srv://<user>:<password>@<cluster>/?retryWrites=true&w=majority" \
     anthropic-api-key="<your key>" \
-    session-secret="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" \
     app-passcode="<the shared passcode>"
 
 az containerapp update \
@@ -79,7 +78,6 @@ az containerapp update \
   --set-env-vars \
     MONGODB_URI=secretref:mongodb-uri \
     ANTHROPIC_API_KEY=secretref:anthropic-api-key \
-    SESSION_SECRET=secretref:session-secret \
     APP_PASSCODE=secretref:app-passcode \
     MONGODB_DB_NAME=short_timer \
     SESSION_COOKIE_SECURE=true \

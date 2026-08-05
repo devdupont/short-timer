@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from short_timer import concept2_cache, hybrid_cache
+from short_timer.auth import DEFAULT_OWNER_ID
 from short_timer.config import get_settings
 from short_timer.db import (
     backfill_owner_ids,
@@ -97,7 +98,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # already belongs to it.
         await ensure_default_user()
         hashes = await backfill_source_hashes()
-        owners = await backfill_owner_ids()
+        owners = await backfill_owner_ids(DEFAULT_OWNER_ID)
         moved = await migrate_wod_parses()
         labelled = await backfill_parse_sources()
         if hashes or owners or moved or labelled:

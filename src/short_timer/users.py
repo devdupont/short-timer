@@ -13,18 +13,23 @@ accounts existed therefore belongs to it, and nothing needs migrating.
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import Annotated, Any
 
-from short_timer.auth import DEFAULT_OWNER_ID
+from fastapi import Depends, HTTPException, status
+
+from short_timer.auth import DEFAULT_OWNER_ID, current_owner
 from short_timer.crypto import SecretBox, SecretStatus, encrypt, is_configured
 from short_timer.db import get_users_collection
 from short_timer.models import (
+    AccountStatus,
     GymConnection,
     GymConnectionUpdate,
     GymConnectionView,
     GymProvider,
     MeResponse,
+    Role,
     User,
     UserConfig,
     UserConfigUpdate,
@@ -33,6 +38,18 @@ from short_timer.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_email(email: str) -> str:
+    """The stored form of an address.
+
+    Case-folded and trimmed, so uniqueness is enforced by the index rather
+    than by every caller remembering to lowercase first. Nothing more
+    aggressive than that: stripping dots or `+tags` is a Gmail-specific rule,
+    and applying it to every provider would silently merge addresses that
+    really are different people.
+    """
+    return email.strip().lower()
 
 
 def _to_document(user: User) -> dict[str, Any]:
@@ -52,13 +69,63 @@ async def get_user(user_id: str) -> User | None:
     return _from_document(doc) if doc is not None else None
 
 
+async def get_user_by_email(email: str) -> User | None:
+    doc = await get_users_collection().find_one({"email": normalize_email(email)})
+    return _from_document(doc) if doc is not None else None
+
+
+# --- Dependencies -----------------------------------------------------------
+# These live here rather than in `auth.py` because they need user *records*,
+# and `auth.py` deliberately knows only about session tokens. Keeping the
+# import one-way (users -> auth) is what stops the two becoming a cycle.
+
+
+async def current_user(owner_id: Annotated[str, Depends(current_owner)]) -> User:
+    """The signed-in account.
+
+    A valid session for an account that no longer exists is treated as no
+    session at all: 401, not 404, because from the caller's point of view
+    their credential simply doesn't authenticate anything any more.
+    """
+    user = await get_user(owner_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    if user.status is not AccountStatus.ACTIVE:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is disabled")
+    return user
+
+
+def require_role(*allowed: Role) -> Callable[[User], Awaitable[User]]:
+    """Dependency factory gating a route on the caller's role.
+
+    Returns 404 rather than 403 on refusal. An endpoint you may not use
+    shouldn't confirm that it exists — that's the existing reasoning behind
+    the operator metrics gate, kept here so every privileged surface answers
+    the same way.
+    """
+    permitted = frozenset(allowed)
+
+    async def dependency(user: Annotated[User, Depends(current_user)]) -> User:
+        if user.role not in permitted:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+        return user
+
+    return dependency
+
+
 async def ensure_default_user() -> bool:
     """Create the passcode user if it isn't there. True when one was created.
 
     Idempotent, and safe to race: two instances booting together both attempt
     the insert, and `$setOnInsert` means the loser doesn't clobber the winner.
+
+    It is created with the *lowest* role on purpose. Everyone who knows the
+    passcode signs in as this account, so making it an admin would hand the
+    Anthropic bill to every visitor — exactly what the operator gate exists to
+    prevent. Privileged access stays with `METRICS_ADMIN_USER_IDS` until real
+    accounts land and there's someone specific to grant it to.
     """
-    user = User(id=DEFAULT_OWNER_ID, display_name="Me")
+    user = User(id=DEFAULT_OWNER_ID, display_name="Me", role=Role.USER)
     document = _to_document(user)
     document.pop("_id")
     result = await get_users_collection().update_one(
@@ -103,6 +170,9 @@ def to_view(config: UserConfig) -> UserConfigView:
 def to_me(user: User) -> MeResponse:
     return MeResponse(
         id=user.id,
+        email=user.email,
+        email_verified=user.email_verified,
+        role=user.role,
         display_name=user.display_name,
         config=to_view(user.config),
         secrets_available=is_configured(),

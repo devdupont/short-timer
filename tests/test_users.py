@@ -3,7 +3,7 @@ from httpx import ASGITransport, AsyncClient
 
 from short_timer import crypto
 from short_timer.app import app
-from short_timer.auth import DEFAULT_OWNER_ID, create_session_token, session_user_id
+from short_timer.auth import DEFAULT_OWNER_ID
 from short_timer.config import get_settings
 from short_timer.crypto import decrypt, generate_key
 from short_timer.db import get_users_collection, get_workouts_collection
@@ -36,30 +36,7 @@ async def authed_client(client: AsyncClient) -> AsyncClient:
     return client
 
 
-# --- Sessions carry a user ---------------------------------------------------
-
-
-def test_session_token_carries_user_id() -> None:
-    assert session_user_id(create_session_token("someone")) == "someone"
-
-
-def test_legacy_token_without_user_id_resolves_to_default() -> None:
-    """Tokens issued before per-user sessions must not sign people out."""
-    from short_timer.auth import _serializer
-
-    legacy = _serializer().dumps({"authenticated": True})
-    assert session_user_id(legacy) == DEFAULT_OWNER_ID
-
-
-def test_unsigned_token_has_no_user() -> None:
-    assert session_user_id("not-a-real-token") is None
-
-
-def test_token_without_authenticated_flag_is_rejected() -> None:
-    from short_timer.auth import _serializer
-
-    forged = _serializer().dumps({"user_id": "someone-else"})
-    assert session_user_id(forged) is None
+# Session mechanics moved to the database; they're covered in test_auth.py.
 
 
 # --- The seeded default user -------------------------------------------------
@@ -264,13 +241,12 @@ async def test_an_unknown_provider_is_rejected(authed_client: AsyncClient) -> No
     assert response.status_code == 422
 
 
-async def test_config_is_scoped_to_the_session_user(authed_client: AsyncClient) -> None:
+async def test_config_is_scoped_to_the_session_user(authed_client: AsyncClient, sign_in_as) -> None:
     """Another user's session must not see this user's credentials."""
     await authed_client.put(
         "/api/me/config",
         json={"gyms": {"wodify_owner": {"credential": "wodify-secret-key-9876"}}},
     )
-    from short_timer.auth import SESSION_COOKIE_NAME
     from short_timer.models import User
 
     other = User(id="someone-else", display_name="Other")
@@ -278,7 +254,7 @@ async def test_config_is_scoped_to_the_session_user(authed_client: AsyncClient) 
     doc["_id"] = doc.pop("id")
     await get_users_collection().insert_one(doc)
 
-    authed_client.cookies.set(SESSION_COOKIE_NAME, create_session_token("someone-else"))
+    await sign_in_as(authed_client, "someone-else")
     response = await authed_client.get("/api/me")
     assert response.status_code == 200
     body = response.json()

@@ -20,7 +20,9 @@ dependencies = [
     # anyway, but the deployment depends on it, so declare it explicitly.
     "dnspython>=2.6",
     "anthropic>=0.40",
-    "itsdangerous>=2.2",
+    # Argon2id password hashing (see passwords.py). Not passlib, whose last
+    # release was 2020, and not bcrypt, which silently truncates at 72 bytes.
+    "argon2-cffi>=25.1",
     # Encrypts per-user third-party credentials at rest (see crypto.py).
     "cryptography>=43",
     # 2.x: `mcp.server.fastmcp.FastMCP` became `mcp.server.mcpserver.MCPServer`,
