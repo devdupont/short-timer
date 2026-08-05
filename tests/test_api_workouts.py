@@ -1,25 +1,17 @@
 from datetime import UTC, datetime
 
 import pytest
-from httpx import ASGITransport, AsyncClient
+from conftest import TEST_EMAIL
+from httpx import AsyncClient
 
-from short_timer.app import app
 from short_timer.dedup import source_hash
-from short_timer.models import Movement, Workout, WorkoutMode, WorkoutSegment
-
-
-@pytest.fixture
-async def client():
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
-
-
-@pytest.fixture
-async def authed_client(client: AsyncClient) -> AsyncClient:
-    response = await client.post("/api/auth/login", json={"passcode": "test-passcode"})
-    assert response.status_code == 204
-    return client
+from short_timer.models import (
+    Movement,
+    User,
+    Workout,
+    WorkoutMode,
+    WorkoutSegment,
+)
 
 
 def _fran() -> Workout:
@@ -35,8 +27,8 @@ def _fran() -> Workout:
     )
 
 
-async def test_login_requires_correct_passcode(client: AsyncClient) -> None:
-    response = await client.post("/api/auth/login", json={"passcode": "wrong"})
+async def test_login_requires_the_correct_password(client: AsyncClient, account: User) -> None:
+    response = await client.post("/api/auth/login", json={"email": TEST_EMAIL, "password": "wrong"})
     assert response.status_code == 401
 
 
@@ -134,34 +126,6 @@ async def test_parse_reuses_saved_workout_without_calling_llm(
     response = await authed_client.post("/api/workouts/parse", json={"text": text})
     assert response.status_code == 200
     assert response.json()["id"] == saved_id
-
-
-async def test_backfill_restores_dedup_for_legacy_rows(authed_client: AsyncClient) -> None:
-    """Rows saved before source_hash existed must still dedupe once backfilled."""
-    from short_timer.db import backfill_source_hashes, get_workouts_collection
-
-    text = "Cindy\nAMRAP 20 minutes:\n5 pull-ups\n10 push-ups\n15 air squats"
-    created = await authed_client.post(
-        "/api/workouts",
-        json={"workout": _fran().model_copy(update={"source_text": text}).model_dump(mode="json")},
-    )
-    legacy_id = created.json()["id"]
-    # Simulate a document written before the field was introduced.
-    await get_workouts_collection().update_one({"_id": legacy_id}, {"$unset": {"source_hash": ""}})
-
-    assert await backfill_source_hashes() == 1
-
-    # Same text, different capitalization — now correctly matches the legacy row.
-    again = await authed_client.post(
-        "/api/workouts",
-        json={
-            "workout": _fran()
-            .model_copy(update={"source_text": text.upper()})
-            .model_dump(mode="json")
-        },
-    )
-    assert again.json()["id"] == legacy_id
-    assert (await authed_client.get("/api/workouts")).json()["total"] == 1
 
 
 async def test_another_owners_workout_is_invisible(

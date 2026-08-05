@@ -14,7 +14,7 @@ import uuid
 from datetime import UTC, date, datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
 from short_timer.crypto import SecretBox, SecretStatus
 from short_timer.dedup import source_hash
@@ -223,8 +223,121 @@ class SeedResponse(BaseModel):
     skipped: int
 
 
+class Role(StrEnum):
+    """What a user may do *globally*.
+
+    This axis answers "what may you see across the whole deployment?" and
+    nothing else. It is deliberately not the place a gym owner goes: being
+    privileged over your own gym's data is a question of *scope* — which
+    records — not of rank, and folding the two together produces a role enum
+    that has to grow a new member every time a new kind of boundary appears.
+    Gym scoping belongs with the plan/tier work; see `docs/roadmap.md`.
+    """
+
+    #: Everyone. Sees their own data and nothing else.
+    USER = "user"
+    #: Support and ops: may read the operator metrics, may not administer
+    #: accounts. Exists so the privileged check can't collapse to `is_admin`.
+    STAFF = "staff"
+    #: The operator. Everything, including invites and other accounts.
+    ADMIN = "admin"
+
+
+#: Roles allowed to read the operator metrics — global spend, every user's
+#: activity. Named here rather than spelled out at the call site so that
+#: adding a privileged surface is a change in one place.
+OPERATOR_ROLES = frozenset({Role.STAFF, Role.ADMIN})
+
+
+class AccountStatus(StrEnum):
+    """Whether an account may be used at all, separate from what it may do."""
+
+    ACTIVE = "active"
+    #: Sign-in refused, data retained. What a ban or a voluntary pause looks
+    #: like; deletion is a different operation.
+    DISABLED = "disabled"
+
+
 class LoginRequest(BaseModel):
-    passcode: str
+    email: EmailStr
+    password: str
+
+
+class RegisterRequest(BaseModel):
+    """Redeeming an invite into an account.
+
+    `password` has a floor but no ceiling worth enforcing beyond a sanity
+    bound: Argon2 has no input length limit (this is the bcrypt trap the
+    algorithm choice avoids), so a long passphrase is simply a better password.
+    """
+
+    invite_token: str
+    email: EmailStr
+    password: str = Field(min_length=1, max_length=1024)
+    display_name: str = Field(default="", max_length=200)
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    password: str = Field(min_length=1, max_length=1024)
+
+
+class ChangePasswordRequest(BaseModel):
+    #: Required even though the caller is already authenticated. A session is
+    #: long-lived here, so possession of one shouldn't be enough to lock the
+    #: real owner out of their own account.
+    current_password: str
+    new_password: str = Field(min_length=1, max_length=1024)
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str
+
+
+class InviteCreateRequest(BaseModel):
+    #: Omit for an open code that anyone holding it may redeem. Naming an
+    #: address both restricts redemption and lets us skip the confirmation
+    #: email, since delivery already proved control of the mailbox.
+    email: EmailStr | None = None
+    role: Role = Role.USER
+
+
+class Invite(BaseModel):
+    """A signup invitation. The token itself is never part of this shape."""
+
+    id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+    email: str | None = None
+    role: Role = Role.USER
+    created_by: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    expires_at: datetime
+    redeemed_at: datetime | None = None
+    redeemed_by: str | None = None
+
+
+class InviteCreatedResponse(BaseModel):
+    """The one and only time the invite token is visible."""
+
+    invite: Invite
+    token: str
+    #: Ready to paste to someone when no email was sent.
+    link: str
+    #: False when an address was named but the mail couldn't be delivered, so
+    #: the admin knows to pass the link along by hand rather than assuming.
+    emailed: bool
+
+
+class InviteCheckResponse(BaseModel):
+    """What the register screen needs before asking for a password."""
+
+    valid: bool
+    #: Pre-fills and locks the email field for an address-bound invite.
+    email: str | None = None
+    reason: str | None = None
 
 
 # --- Users and their per-user configuration ---------------------------------
@@ -399,41 +512,6 @@ class UserConfig(BaseModel):
 
     def connection(self, provider: GymProvider) -> GymConnection | None:
         return next((c for c in self.gyms if c.provider == provider), None)
-
-
-class Role(StrEnum):
-    """What a user may do *globally*.
-
-    This axis answers "what may you see across the whole deployment?" and
-    nothing else. It is deliberately not the place a gym owner goes: being
-    privileged over your own gym's data is a question of *scope* — which
-    records — not of rank, and folding the two together produces a role enum
-    that has to grow a new member every time a new kind of boundary appears.
-    Gym scoping belongs with the plan/tier work; see `docs/roadmap.md`.
-    """
-
-    #: Everyone. Sees their own data and nothing else.
-    USER = "user"
-    #: Support and ops: may read the operator metrics, may not administer
-    #: accounts. Exists so the privileged check can't collapse to `is_admin`.
-    STAFF = "staff"
-    #: The operator. Everything, including invites and other accounts.
-    ADMIN = "admin"
-
-
-#: Roles allowed to read the operator metrics — global spend, every user's
-#: activity. Named here rather than spelled out at the call site so that
-#: adding a privileged surface is a change in one place.
-OPERATOR_ROLES = frozenset({Role.STAFF, Role.ADMIN})
-
-
-class AccountStatus(StrEnum):
-    """Whether an account may be used at all, separate from what it may do."""
-
-    ACTIVE = "active"
-    #: Sign-in refused, data retained. What a ban or a voluntary pause looks
-    #: like; deletion is a different operation.
-    DISABLED = "disabled"
 
 
 class User(BaseModel):

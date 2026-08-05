@@ -54,17 +54,17 @@ demand, and what demand cost after the caches took their share.
 shape the eventual per-plan usage meter and gym-owner view get built from.
 
 `GET /api/metrics/operator` — everything, across every user, including spend.
-**Gated on an allowlist that defaults to empty**, set via
-`METRICS_ADMIN_USER_IDS`. There are no roles yet and everyone authenticates as
-one shared-passcode user, so a `require_session` gate alone would have handed
-the Anthropic bill to anyone who knows the passcode. It returns 404 rather than
-403 to a caller who isn't on the list — an endpoint you may not read shouldn't
-confirm it exists.
+**Gated on the caller's role**: `staff` or `admin` (`OPERATOR_ROLES` in
+`models.py`). It returns 404 rather than 403 to anyone else — an endpoint you
+may not read shouldn't confirm it exists.
 
-That allowlist is a placeholder for a `role` field on `User`, which is what
-should gate this once accounts exist. See *Roles on the user record* in
-`docs/roadmap.md` for the roles needed, the single function that changes, and
-why a gym owner doesn't fit on the same axis as an admin.
+`METRICS_ADMIN_USER_IDS` survives as a **break-glass**, not the mechanism. A
+role stored in the database is unreadable in exactly the situation where you
+most want metrics: the database is sick, or a bad write put the wrong roles in.
+It defaults to empty, and logs a warning when it's what let you in.
+
+See `docs/accounts.md` for the role model, including why a gym owner doesn't
+fit on the same axis as an admin.
 
 ## Retention and scale
 

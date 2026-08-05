@@ -3,11 +3,9 @@
 import httpx
 import pytest
 import respx
-from httpx import ASGITransport, AsyncClient
+from httpx import AsyncClient
 
 from short_timer import crypto
-from short_timer.app import app
-from short_timer.auth import DEFAULT_OWNER_ID
 from short_timer.config import get_settings
 from short_timer.crypto import encrypt, generate_key
 from short_timer.db import (
@@ -23,7 +21,7 @@ from short_timer.gym_cache import (
     resolve_source,
 )
 from short_timer.models import GymProvider, User, Workout, WorkoutMode
-from short_timer.users import ensure_default_user, get_user
+from short_timer.users import get_user
 
 WHITEBOARD = "https://app.wodify.com/Performance/PublicWhiteboard.aspx"
 PROGRAM_API = "https://api.wodify.com/v1/workouts/formattedworkout"
@@ -57,28 +55,13 @@ def _no_real_llm(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(gym_cache, "parse_workout_text", fake_parse)
 
 
-@pytest.fixture
-async def client():
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
-
-
-@pytest.fixture
-async def authed_client(client: AsyncClient) -> AsyncClient:
-    response = await client.post("/api/auth/login", json={"passcode": "test-passcode"})
-    assert response.status_code == 204
-    return client
-
-
 async def _configure(
     provider: GymProvider,
-    user_id: str = DEFAULT_OWNER_ID,
+    user_id: str,
     key: str = "wb-key-1234",
     **fields: object,
 ) -> None:
     """Store one gym connection, bypassing the API so tests can set any shape."""
-    await ensure_default_user()
     connection = {
         "provider": provider.value,
         "credential": encrypt(key).model_dump(mode="json"),
@@ -90,36 +73,34 @@ async def _configure(
     )
 
 
-async def _configure_member(user_id: str = DEFAULT_OWNER_ID, key: str = "wb-key-1234") -> None:
+async def _configure_member(user_id: str, key: str = "wb-key-1234") -> None:
     await _configure(GymProvider.WODIFY_MEMBER, user_id=user_id, key=key)
 
 
 # --- Resolving configuration -------------------------------------------------
 
 
-async def test_unconfigured_user_resolves_to_nothing() -> None:
-    await ensure_default_user()
-    user = await get_user(DEFAULT_OWNER_ID)
+async def test_unconfigured_user_resolves_to_nothing(account: User) -> None:
+    user = await get_user(account.id)
     assert user is not None
     assert resolve_source(user) is None
 
 
-async def test_disabled_config_resolves_to_nothing() -> None:
+async def test_disabled_config_resolves_to_nothing(account: User) -> None:
     """A saved key that's switched off must not be fetched."""
-    await _configure_member()
+    await _configure_member(account.id)
     await get_users_collection().update_one(
-        {"_id": DEFAULT_OWNER_ID}, {"$set": {"config.gyms.0.enabled": False}}
+        {"_id": account.id}, {"$set": {"config.gyms.0.enabled": False}}
     )
-    user = await get_user(DEFAULT_OWNER_ID)
+    user = await get_user(account.id)
     assert user is not None
     assert resolve_source(user) is None
 
 
-async def test_member_route_wins_when_both_configured() -> None:
+async def test_member_route_wins_when_both_configured(account: User) -> None:
     """PROVIDER_PRIORITY decides, not which connection was stored first."""
-    await ensure_default_user()
     await get_users_collection().update_one(
-        {"_id": DEFAULT_OWNER_ID},
+        {"_id": account.id},
         {
             "$set": {
                 "config.gyms": [
@@ -140,7 +121,7 @@ async def test_member_route_wins_when_both_configured() -> None:
             }
         },
     )
-    user = await get_user(DEFAULT_OWNER_ID)
+    user = await get_user(account.id)
     assert user is not None
     source = resolve_source(user)
     assert source is not None
@@ -148,15 +129,15 @@ async def test_member_route_wins_when_both_configured() -> None:
 
 
 async def test_credential_that_cannot_be_decrypted_resolves_to_nothing(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, account: User
 ) -> None:
     """A rotated-away key must degrade to "unconfigured", not crash the feed."""
-    await _configure_member()
+    await _configure_member(account.id)
     monkeypatch.setenv("SECRETS_KEYS", generate_key())
     get_settings.cache_clear()
     crypto._cipher.cache_clear()
 
-    user = await get_user(DEFAULT_OWNER_ID)
+    user = await get_user(account.id)
     assert user is not None
     assert resolve_source(user) is None
 
@@ -175,9 +156,9 @@ async def test_unconfigured_feed_is_empty_not_an_error(authed_client: AsyncClien
 
 
 @respx.mock
-async def test_configured_feed_returns_workouts(authed_client: AsyncClient) -> None:
+async def test_configured_feed_returns_workouts(authed_client: AsyncClient, account: User) -> None:
     respx.get(WHITEBOARD).mock(return_value=httpx.Response(200, html=BOARD_HTML))
-    await _configure_member()
+    await _configure_member(account.id)
 
     response = await authed_client.get("/api/gym/wods?days=3")
     assert response.status_code == 200
@@ -189,9 +170,11 @@ async def test_configured_feed_returns_workouts(authed_client: AsyncClient) -> N
 
 
 @respx.mock
-async def test_feed_marks_workouts_already_in_the_library(authed_client: AsyncClient) -> None:
+async def test_feed_marks_workouts_already_in_the_library(
+    authed_client: AsyncClient, account: User
+) -> None:
     respx.get(WHITEBOARD).mock(return_value=httpx.Response(200, html=BOARD_HTML))
-    await _configure_member()
+    await _configure_member(account.id)
 
     first = await authed_client.get("/api/gym/wods?days=1")
     text = first.json()["wods"][0]["text"]
@@ -200,7 +183,7 @@ async def test_feed_marks_workouts_already_in_the_library(authed_client: AsyncCl
     workout = Workout(name="Saved", mode=WorkoutMode.FOR_TIME, source_text=text)
     doc = workout.model_dump(mode="json")
     doc["_id"] = doc.pop("id")
-    doc["owner_id"] = DEFAULT_OWNER_ID
+    doc["owner_id"] = account.id
     doc["source_hash"] = source_hash(text)
     await get_workouts_collection().insert_one(doc)
 
@@ -210,11 +193,11 @@ async def test_feed_marks_workouts_already_in_the_library(authed_client: AsyncCl
 
 @respx.mock
 async def test_feed_is_served_from_cache_on_repeat_requests(
-    authed_client: AsyncClient,
+    authed_client: AsyncClient, account: User
 ) -> None:
     """No request should wait on Wodify once the cache is warm."""
     route = respx.get(WHITEBOARD).mock(return_value=httpx.Response(200, html=BOARD_HTML))
-    await _configure_member()
+    await _configure_member(account.id)
 
     await authed_client.get("/api/gym/wods?days=2")
     calls_after_first = route.call_count
@@ -228,10 +211,12 @@ async def test_feed_is_served_from_cache_on_repeat_requests(
 
 
 @respx.mock
-async def test_one_gyms_workouts_never_reach_another_gym(authed_client: AsyncClient) -> None:
+async def test_one_gyms_workouts_never_reach_another_gym(
+    authed_client: AsyncClient, account: User
+) -> None:
     """The cache is shared, so this is the isolation that matters."""
     respx.get(WHITEBOARD).mock(return_value=httpx.Response(200, html=BOARD_HTML))
-    await _configure_member(key="gym-a-key")
+    await _configure_member(account.id, key="gym-a-key")
     await authed_client.get("/api/gym/wods?days=2")
 
     # A second user at a different gym.
@@ -251,10 +236,10 @@ async def test_one_gyms_workouts_never_reach_another_gym(authed_client: AsyncCli
 
 
 @respx.mock
-async def test_members_of_the_same_gym_share_one_fetch() -> None:
+async def test_members_of_the_same_gym_share_one_fetch(account: User) -> None:
     """A gym with many members should be fetched once, not once per member."""
     route = respx.get(WHITEBOARD).mock(return_value=httpx.Response(200, html=BOARD_HTML))
-    await _configure_member(key="shared-gym-key")
+    await _configure_member(account.id, key="shared-gym-key")
     for user_id in ("member-2", "member-3"):
         doc = User(id=user_id).model_dump(mode="json")
         doc["_id"] = doc.pop("id")
@@ -268,9 +253,9 @@ async def test_members_of_the_same_gym_share_one_fetch() -> None:
 
 
 @respx.mock
-async def test_stored_cache_holds_no_credential() -> None:
+async def test_stored_cache_holds_no_credential(account: User) -> None:
     respx.get(WHITEBOARD).mock(return_value=httpx.Response(200, html=BOARD_HTML))
-    await _configure_member(key="very-secret-key")
+    await _configure_member(account.id, key="very-secret-key")
     await refresh_all_configured()
 
     async for doc in get_gym_cache_collection().find({}):
@@ -280,13 +265,14 @@ async def test_stored_cache_holds_no_credential() -> None:
 @respx.mock
 async def test_refresh_skips_users_without_a_gym() -> None:
     respx.get(WHITEBOARD).mock(return_value=httpx.Response(200, html=BOARD_HTML))
-    await ensure_default_user()
     assert await refresh_all_configured() == 0
 
 
-async def test_feed_is_scoped_to_the_session_user(authed_client: AsyncClient, sign_in_as) -> None:
+async def test_feed_is_scoped_to_the_session_user(
+    authed_client: AsyncClient, sign_in_as, account: User
+) -> None:
     """Another user's session must not inherit this user's gym."""
-    await _configure_member()
+    await _configure_member(account.id)
     other = User(id="stranger")
     doc = other.model_dump(mode="json")
     doc["_id"] = doc.pop("id")
@@ -316,10 +302,10 @@ async def test_providers_endpoint_requires_a_session(client: AsyncClient) -> Non
 
 
 async def test_health_reports_a_connection_that_has_never_fetched(
-    authed_client: AsyncClient,
+    authed_client: AsyncClient, account: User
 ) -> None:
     """The one signal that distinguishes a bad key from a quiet gym."""
-    await _configure_member(key="never-fetched-key")
+    await _configure_member(account.id, key="never-fetched-key")
     response = await authed_client.get("/api/gym/health")
     assert response.status_code == 200
     [entry] = response.json()
@@ -329,9 +315,11 @@ async def test_health_reports_a_connection_that_has_never_fetched(
 
 
 @respx.mock
-async def test_health_reports_a_working_connection(authed_client: AsyncClient) -> None:
+async def test_health_reports_a_working_connection(
+    authed_client: AsyncClient, account: User
+) -> None:
     respx.get(WHITEBOARD).mock(return_value=httpx.Response(200, html=BOARD_HTML))
-    await _configure_member()
+    await _configure_member(account.id)
     await authed_client.get("/api/gym/wods?days=2")
 
     [entry] = (await authed_client.get("/api/gym/health")).json()
@@ -347,7 +335,9 @@ async def test_health_is_empty_when_nothing_is_connected(authed_client: AsyncCli
 
 
 @respx.mock
-async def test_a_sugarwod_gym_feeds_the_home_page(authed_client: AsyncClient) -> None:
+async def test_a_sugarwod_gym_feeds_the_home_page(
+    authed_client: AsyncClient, account: User
+) -> None:
     """The point of the registry: a new platform needs no new feed plumbing."""
     respx.get("https://api.sugarwod.com/v2/workouts").mock(
         return_value=httpx.Response(
@@ -367,7 +357,7 @@ async def test_a_sugarwod_gym_feeds_the_home_page(authed_client: AsyncClient) ->
             },
         )
     )
-    await _configure(GymProvider.SUGARWOD_OWNER, key="sugar-key-1234")
+    await _configure(GymProvider.SUGARWOD_OWNER, user_id=account.id, key="sugar-key-1234")
 
     response = await authed_client.get("/api/gym/wods?days=7")
     assert response.status_code == 200
@@ -415,19 +405,19 @@ async def test_provider_payload_matches_the_frontend_interface(
 
 
 async def test_health_payload_matches_the_frontend_interface(
-    authed_client: AsyncClient,
+    authed_client: AsyncClient, account: User
 ) -> None:
     """Keys must match `GymConnectionHealth` in web/src/types.ts."""
-    await _configure_member()
+    await _configure_member(account.id)
     [entry] = (await authed_client.get("/api/gym/health")).json()
     assert set(entry) == {"provider", "last_fetched_at", "cached_days"}
 
 
 async def test_config_payload_matches_the_frontend_interface(
-    authed_client: AsyncClient,
+    authed_client: AsyncClient, account: User
 ) -> None:
     """Keys must match `UserConfig` / `GymConnection` in web/src/types.ts."""
-    await _configure_member()
+    await _configure_member(account.id)
     config = (await authed_client.get("/api/me")).json()["config"]
     assert set(config) == {"gyms", "feeds"}
     [connection] = config["gyms"]
@@ -437,11 +427,11 @@ async def test_config_payload_matches_the_frontend_interface(
 
 @respx.mock
 async def test_gym_entry_payload_matches_the_frontend_interface(
-    authed_client: AsyncClient,
+    authed_client: AsyncClient, account: User
 ) -> None:
     """Keys must match `GymWodEntry` in web/src/types.ts."""
     respx.get(WHITEBOARD).mock(return_value=httpx.Response(200, html=BOARD_HTML))
-    await _configure_member()
+    await _configure_member(account.id)
     [entry, *_] = (await authed_client.get("/api/gym/wods?days=2")).json()["wods"]
     assert set(entry) == {
         "date",

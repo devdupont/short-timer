@@ -1,13 +1,13 @@
 """Accounts and the per-user configuration hanging off them.
 
-There's still exactly one way to authenticate — the shared passcode — but it
-now resolves to a *user record* rather than a constant. That record is what
-owns workouts and holds per-user integration settings, so adding real signup
-later means adding a second way to arrive at a user id, not reworking storage.
+A user record is what owns workouts (via `owner_id`), holds per-user
+integration credentials, and carries the role every privileged check reads.
+Creating one is the only way an owner id comes into existence — there is no
+default account and no way to arrive at an id that has no record behind it.
 
-The seeded default user's id is deliberately `DEFAULT_OWNER_ID`, matching what
-`backfill_owner_ids` stamped on pre-tenancy rows. Every workout saved before
-accounts existed therefore belongs to it, and nothing needs migrating.
+The dependencies at the bottom (`current_user`, `require_role`) live here
+rather than in `auth.py` because they need records, and `auth.py` deliberately
+knows only about session tokens. That keeps the import direction one-way.
 """
 
 from __future__ import annotations
@@ -18,8 +18,9 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import Depends, HTTPException, status
+from pymongo.errors import DuplicateKeyError
 
-from short_timer.auth import DEFAULT_OWNER_ID, current_owner
+from short_timer.auth import current_owner
 from short_timer.crypto import SecretBox, SecretStatus, encrypt, is_configured
 from short_timer.db import get_users_collection
 from short_timer.models import (
@@ -36,6 +37,7 @@ from short_timer.models import (
     UserConfigView,
     normalize_feeds,
 )
+from short_timer.passwords import hash_password, needs_rehash
 
 logger = logging.getLogger(__name__)
 
@@ -113,28 +115,70 @@ def require_role(*allowed: Role) -> Callable[[User], Awaitable[User]]:
     return dependency
 
 
-async def ensure_default_user() -> bool:
-    """Create the passcode user if it isn't there. True when one was created.
+# --- Creating and changing accounts -----------------------------------------
 
-    Idempotent, and safe to race: two instances booting together both attempt
-    the insert, and `$setOnInsert` means the loser doesn't clobber the winner.
 
-    It is created with the *lowest* role on purpose. Everyone who knows the
-    passcode signs in as this account, so making it an admin would hand the
-    Anthropic bill to every visitor — exactly what the operator gate exists to
-    prevent. Privileged access stays with `METRICS_ADMIN_USER_IDS` until real
-    accounts land and there's someone specific to grant it to.
+class EmailAlreadyRegisteredError(RuntimeError):
+    """Raised when an address already has an account."""
+
+
+async def create_user(
+    *,
+    email: str,
+    password: str | None,
+    display_name: str = "",
+    role: Role = Role.USER,
+    email_verified: bool = False,
+) -> User:
+    """Create an account, or raise if the address is taken.
+
+    The uniqueness check is the *index*, not a prior read: two registrations
+    racing on the same address would both find it free and both insert. Letting
+    the write fail and translating the error is the only version of this that
+    is actually atomic.
+
+    `password` may be None for an account that will only ever sign in with a
+    passkey.
     """
-    user = User(id=DEFAULT_OWNER_ID, display_name="Me", role=Role.USER)
-    document = _to_document(user)
-    document.pop("_id")
-    result = await get_users_collection().update_one(
-        {"_id": DEFAULT_OWNER_ID}, {"$setOnInsert": document}, upsert=True
+    user = User(
+        email=normalize_email(email),
+        email_verified=email_verified,
+        password_hash=hash_password(password) if password is not None else None,
+        role=role,
+        display_name=display_name.strip(),
     )
-    created = result.upserted_id is not None
-    if created:
-        logger.info("Seeded the default user account.")
-    return created
+    try:
+        await get_users_collection().insert_one(_to_document(user))
+    except DuplicateKeyError as exc:
+        raise EmailAlreadyRegisteredError(email) from exc
+    logger.info("Created account %s with role %s.", user.id, user.role.value)
+    return user
+
+
+async def set_password(user_id: str, password: str) -> None:
+    await _update_fields(user_id, {"password_hash": hash_password(password)})
+
+
+async def mark_email_verified(user_id: str) -> None:
+    await _update_fields(user_id, {"email_verified": True})
+
+
+async def rehash_if_needed(user: User, password: str) -> None:
+    """Upgrade a stored hash to current parameters, on a successful login.
+
+    This is the only moment the plaintext exists to re-hash with, which is why
+    raising the work factor has to be done here rather than in a migration.
+    """
+    if user.password_hash is None or not needs_rehash(user.password_hash):
+        return
+    await set_password(user.id, password)
+    logger.info("Upgraded the password hash for %s to current parameters.", user.id)
+
+
+async def _update_fields(user_id: str, fields: dict[str, Any]) -> None:
+    await get_users_collection().update_one(
+        {"_id": user_id}, {"$set": {**fields, "updated_at": datetime.now(UTC).isoformat()}}
+    )
 
 
 # --- Reading config out to a client -----------------------------------------

@@ -1,28 +1,45 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import "./App.css";
+import { AuthGate } from "./components/AuthGate";
 import { Home } from "./components/Home";
-import { PasscodeGate } from "./components/PasscodeGate";
 import { Settings } from "./components/Settings";
 import { TimerView } from "./components/TimerView";
 import { WorkoutBuilder } from "./components/WorkoutBuilder";
 import { WorkoutImport } from "./components/WorkoutImport";
 import { WorkoutLibrary } from "./components/WorkoutLibrary";
 import type { EditTarget } from "./components/WorkoutBuilder";
-import { logout } from "./api";
+import { getMe, logout } from "./api";
 import type { Workout } from "./types";
 
 type Tab = "home" | "import" | "build" | "library" | "timer" | "settings";
 
 function App() {
-  const [unlocked, setUnlocked] = useState(false);
+  // `null` means "we haven't asked yet". Without that third state the app
+  // flashes the sign-in screen on every reload, which it used to do: the
+  // session cookie was never checked at startup, so a signed-in user was
+  // asked to sign in again each time they opened the page.
+  const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [tab, setTab] = useState<Tab>("home");
   const [activeWorkout, setActiveWorkout] = useState<Workout | null>(null);
   const [libraryRefreshKey, setLibraryRefreshKey] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
 
-  if (!unlocked) {
-    return <PasscodeGate onUnlocked={() => setUnlocked(true)} />;
+  useEffect(() => {
+    let cancelled = false;
+    getMe()
+      .then(() => !cancelled && setSignedIn(true))
+      .catch(() => !cancelled && setSignedIn(false));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (signedIn === null) {
+    return <div className="passcode-gate" />;
+  }
+  if (!signedIn) {
+    return <AuthGate onSignedIn={() => setSignedIn(true)} />;
   }
 
   function handleSaved(workout: Workout) {
@@ -94,10 +111,10 @@ function App() {
             onClick={() => {
               logout();
               setMenuOpen(false);
-              setUnlocked(false);
+              setSignedIn(false);
             }}
           >
-            Lock
+            Sign out
           </button>
         </div>
       </header>

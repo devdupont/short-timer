@@ -16,7 +16,6 @@ from pymongo.asynchronous.collection import AsyncCollection
 from pymongo.asynchronous.database import AsyncDatabase
 
 from short_timer.config import get_settings
-from short_timer.dedup import source_hash
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +83,20 @@ def get_sessions_collection() -> AsyncCollection[dict[str, Any]]:
     return get_database()["sessions"]
 
 
+def get_invites_collection() -> AsyncCollection[dict[str, Any]]:
+    """Signup invitations. `_id` is a public id; the token is stored hashed.
+
+    The two are separate because an admin screen has to list and revoke
+    invites, and it can't do that by an identifier it isn't allowed to see.
+    """
+    return get_database()["invites"]
+
+
+def get_email_tokens_collection() -> AsyncCollection[dict[str, Any]]:
+    """Address-verification and password-reset tokens, keyed by token hash."""
+    return get_database()["email_tokens"]
+
+
 def get_rate_limit_collection() -> AsyncCollection[dict[str, Any]]:
     """Rate-limit counters, one document per (scope, subject, window)."""
     return get_database()["rate_limits"]
@@ -132,6 +145,25 @@ async def ensure_indexes() -> None:
     await get_parse_cache_collection().create_index([("source", 1), ("created_at", 1)])
     # Spent rate-limit windows clean themselves up rather than growing forever.
     await get_rate_limit_collection().create_index("expires_at", expireAfterSeconds=0)
+    # One account per address, enforced by the index rather than by a read
+    # before the write — two registrations racing would both find it free.
+    # Sparse, so passkey-only accounts without an address don't collide.
+    await get_users_collection().create_index("email", unique=True, sparse=True)
+    # "End every session for this user" is a delete by user_id, and it runs on
+    # every password reset.
+    await get_sessions_collection().create_index("user_id")
+    # Expired sessions are already rejected and deleted on read (see
+    # sessions.py). This index is only the janitor for tokens nobody ever
+    # presents again — it is not the expiry check.
+    await get_sessions_collection().create_index("expires_at", expireAfterSeconds=0)
+    # Redemption looks an invite up by the hash of the token presented.
+    await get_invites_collection().create_index("token_hash", unique=True)
+    # Reset tokens are invalidated in bulk when a new one is issued.
+    await get_email_tokens_collection().create_index([("user_id", 1), ("kind", 1)])
+    # Same as sessions: these expire in code, and the index is the janitor.
+    # Invites are *not* swept — a redeemed or expired one is worth keeping so
+    # an admin can see that it was used, and by whom.
+    await get_email_tokens_collection().create_index("expires_at", expireAfterSeconds=0)
     # One account per address. Sparse, because the shared-passcode account has
     # no email and two documents with a missing field would otherwise collide
     # on a plain unique index.
@@ -153,39 +185,3 @@ async def ensure_indexes() -> None:
     await get_events_collection().create_index(
         "at", expireAfterSeconds=get_settings().events_retention_days * 24 * 60 * 60
     )
-
-
-async def backfill_source_hashes() -> int:
-    """Populate `source_hash` on workouts saved before the field existed.
-
-    Without this, legacy rows are invisible to dedup lookups: they'd be
-    duplicated on save and re-parsed by the LLM even though an identical
-    workout is already stored.
-    """
-    collection = get_workouts_collection()
-    updated = 0
-    async for doc in collection.find({"source_hash": None}):
-        text = doc.get("source_text")
-        if not text:
-            continue
-        await collection.update_one(
-            {"_id": doc["_id"]}, {"$set": {"source_hash": source_hash(text)}}
-        )
-        updated += 1
-    return updated
-
-
-async def backfill_owner_ids(default_owner_id: str) -> int:
-    """Assign pre-tenancy workouts to the default owner.
-
-    Rows written before `owner_id` existed would otherwise be invisible to
-    every owner-scoped query — effectively vanishing from the library.
-
-    The owner is passed in rather than imported: this module sits *below*
-    `auth`, which now reaches the database itself to resolve sessions, so
-    importing the constant from there would close an import cycle.
-    """
-    result = await get_workouts_collection().update_many(
-        {"owner_id": None}, {"$set": {"owner_id": default_owner_id}}
-    )
-    return int(result.modified_count)

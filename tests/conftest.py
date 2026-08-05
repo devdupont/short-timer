@@ -1,28 +1,45 @@
 import os
 
-os.environ.setdefault("APP_PASSCODE", "test-passcode")
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-anthropic-key")
 os.environ.setdefault("MONGODB_URI", "mongodb://localhost:27017")
 os.environ.setdefault("MONGODB_DB_NAME", "short_timer_test")
 os.environ.setdefault("SESSION_COOKIE_SECURE", "false")
+# Sending is off, so the flows that email a token log it instead. Every test
+# that needs a token reads it from the database rather than an inbox.
+os.environ.setdefault("EMAIL_ENABLED", "false")
 
 from collections.abc import Awaitable, Callable
 
 import pytest
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 from mongomock_motor import AsyncMongoMockClient
 
 from short_timer import db as db_module
 from short_timer import llm as llm_module
+from short_timer.app import app
 from short_timer.auth import SESSION_COOKIE_NAME
+from short_timer.models import Role, User
 from short_timer.sessions import create_session
+from short_timer.users import create_user
+
+#: The account `authed_client` signs in as. Long enough to clear the minimum.
+TEST_EMAIL = "athlete@example.com"
+TEST_PASSWORD = "correct-horse-battery-staple"
 
 
 @pytest.fixture(autouse=True)
-def _mock_mongo(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every test gets an isolated in-memory Mongo instead of a real one."""
+async def _mock_mongo(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every test gets an isolated in-memory Mongo instead of a real one.
+
+    The indexes are created too, not just the collections. One of them is load
+    bearing rather than an optimisation: the unique index on `email` is what
+    makes two concurrent registrations for the same address fail instead of
+    both succeeding, so a suite without it would pass while production
+    accumulated duplicate accounts.
+    """
     client = AsyncMongoMockClient()
     monkeypatch.setattr(db_module, "get_client", lambda: client)
+    await db_module.ensure_indexes()
 
 
 @pytest.fixture(autouse=True)
@@ -37,8 +54,35 @@ def _fresh_anthropic_client() -> None:
 
 
 @pytest.fixture
+async def client():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+
+
+@pytest.fixture
+async def account() -> User:
+    """An ordinary, verified account — the default identity for tests."""
+    return await create_user(
+        email=TEST_EMAIL, password=TEST_PASSWORD, display_name="Me", email_verified=True
+    )
+
+
+@pytest.fixture
+async def admin_account() -> User:
+    """An admin, for the operator and administration surfaces."""
+    return await create_user(
+        email="admin@example.com",
+        password=TEST_PASSWORD,
+        display_name="Admin",
+        role=Role.ADMIN,
+        email_verified=True,
+    )
+
+
+@pytest.fixture
 def sign_in_as() -> Callable[[AsyncClient, str], Awaitable[str]]:
-    """Put a client in a real session for an arbitrary user.
+    """Put a client in a real session for an arbitrary user id.
 
     Sessions live in the database now, so a test can't mint one by signing a
     payload — it has to create the row. This is what the cross-owner isolation
@@ -51,3 +95,17 @@ def sign_in_as() -> Callable[[AsyncClient, str], Awaitable[str]]:
         return token
 
     return _sign_in
+
+
+@pytest.fixture
+async def authed_client(client: AsyncClient, account: User, sign_in_as) -> AsyncClient:
+    """A client signed in as `account`."""
+    await sign_in_as(client, account.id)
+    return client
+
+
+@pytest.fixture
+async def admin_client(client: AsyncClient, admin_account: User, sign_in_as) -> AsyncClient:
+    """A client signed in as `admin_account`."""
+    await sign_in_as(client, admin_account.id)
+    return client

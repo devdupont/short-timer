@@ -11,7 +11,6 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    app_passcode: str = Field(..., description="Shared passcode required to use the app.")
     session_cookie_secure: bool = Field(
         default=True, description="Set false only for plain-http local dev/tests."
     )
@@ -30,6 +29,34 @@ class Settings(BaseSettings):
     # config must not render every stored credential unreadable. Empty is valid and
     # simply disables credential storage (see crypto.is_configured).
     secrets_keys: Annotated[list[str], NoDecode] = Field(default_factory=list)
+
+    # --- Accounts -----------------------------------------------------------
+    #: Where the *frontend* lives. Every link we email — verify, reset,
+    #: invite — is built against this, so it must be the site the user opens,
+    #: not this API.
+    public_base_url: str = "http://localhost:5173"
+    #: Shortest password we'll accept. Length is the only user-chosen property
+    #: that reliably predicts strength; composition rules mostly produce
+    #: "Password1!" and a sticky note.
+    password_min_length: int = 12
+    #: How long each emailed token stays good for. Reset is deliberately the
+    #: shortest — it's the one that takes over an account outright.
+    invite_ttl_hours: int = 24 * 14
+    verify_ttl_hours: int = 48
+    reset_ttl_minutes: int = 60
+
+    # --- Outbound email (Postmark) ------------------------------------------
+    #: Off by default so local dev and CI never try to send. Tokens are logged
+    #: instead, which is what makes the whole flow testable without a provider.
+    email_enabled: bool = False
+    postmark_server_token: str = ""
+    #: Must be on the authenticated sending subdomain. shortimer.com publishes
+    #: DMARC with strict alignment (adkim=s), so a From: on the apex fails
+    #: authentication outright rather than merely landing in spam.
+    email_from: str = "shortimer <no-reply@send.shortimer.com>"
+    #: Postmark rejects a send whose stream doesn't exist; "outbound" is the
+    #: default transactional stream every account starts with.
+    postmark_message_stream: str = "outbound"
 
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-5"

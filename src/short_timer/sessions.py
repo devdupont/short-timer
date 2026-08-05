@@ -27,34 +27,20 @@ collection growing without bound; it is not the check.
 
 from __future__ import annotations
 
-import hashlib
 import logging
-import secrets
 from datetime import UTC, datetime, timedelta
 
 from short_timer.config import get_settings
 from short_timer.db import get_sessions_collection
+from short_timer.tokens import hash_token as _hash
+from short_timer.tokens import new_token
 
 logger = logging.getLogger(__name__)
-
-#: Bytes of entropy in a session token. OWASP's floor is 64 bits; 256 costs
-#: nothing here and removes the question.
-_TOKEN_BYTES = 32
 
 #: How stale the idle deadline may get before a read bothers to push it
 #: forward. Sliding on literally every request would mean a database write
 #: per request to move a 30-day deadline by milliseconds.
 _TOUCH_INTERVAL = timedelta(hours=1)
-
-
-def _hash(token: str) -> str:
-    """The stored form of a token. Plain SHA-256, deliberately.
-
-    No salt and no KDF: unlike a password this is 256 bits of uniform
-    randomness, so there is no dictionary to attack and nothing for a slow
-    hash to buy. What matters is that the stored value can't be replayed.
-    """
-    return hashlib.sha256(token.encode()).hexdigest()
 
 
 def _as_utc(value: object) -> datetime | None:
@@ -75,7 +61,7 @@ async def create_session(user_id: str, *, user_agent: str | None = None) -> str:
     """Start a session and return the raw token. It is never recoverable again."""
     settings = get_settings()
     now = datetime.now(UTC)
-    token = secrets.token_urlsafe(_TOKEN_BYTES)
+    token = new_token()
 
     await get_sessions_collection().insert_one(
         {

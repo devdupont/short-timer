@@ -13,7 +13,9 @@ authors = [{ name = "Michael Dupont" }]
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.34",
-    "pydantic>=2.9",
+    # The `email` extra pulls in email-validator, which backs `EmailStr` on
+    # the register and invite payloads.
+    "pydantic[email]>=2.9",
     "pydantic-settings>=2.6",
     "pymongo>=4.9",
     # Resolves mongodb+srv:// URIs (MongoDB Atlas). Current pymongo requires it
@@ -80,6 +82,12 @@ files = ["src"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = ["live: hits the real Anthropic API; needs a real ANTHROPIC_API_KEY"]
+# mongomock calls the deprecated datetime.utcnow() internally, once per index
+# operation — and every test now builds the indexes, so this drowns out our own
+# warnings. Scoped to that module so a deprecation in *our* code still shows.
+filterwarnings = [
+    "ignore:datetime.datetime.utcnow\\(\\) is deprecated:DeprecationWarning:mongomock.helpers",
+]
 
 [tool.ruff]
 target-version = "py314"

@@ -119,37 +119,6 @@ async def prune_expired_parses(*, now: datetime | None = None) -> int:
     return removed
 
 
-async def backfill_parse_sources() -> int:
-    """Label entries written before provenance was tracked.
-
-    An entry matching a cached crossfit.com day is permanent; anything else is
-    treated as user-submitted. Without this they'd have no `source` at all and
-    the sweep would treat every one of them as user content.
-    """
-    from short_timer.db import get_wod_cache_collection
-
-    wod_hashes: set[str] = set()
-    async for doc in get_wod_cache_collection().find({}, {"text": 1}):
-        text = doc.get("text")
-        if isinstance(text, str) and text:
-            wod_hashes.add(source_hash(text))
-
-    collection = get_parse_cache_collection()
-    labelled = 0
-    async for doc in collection.find({"source": None}):
-        source = SOURCE_CROSSFIT if doc["_id"] in wod_hashes else SOURCE_USER
-        updates: dict[str, object] = {"source": source}
-        # Without a timestamp the sweep can't age an entry out; start its clock now.
-        if not isinstance(doc.get("created_at"), datetime):
-            updates["created_at"] = datetime.now(UTC)
-        await collection.update_one({"_id": doc["_id"]}, {"$set": updates})
-        labelled += 1
-
-    if labelled:
-        logger.info("Labelled provenance on %d parse pool entr(ies).", labelled)
-    return labelled
-
-
 async def find_parse(text: str) -> Workout | None:
     """A previously-parsed workout for this text, as a fresh unsaved Workout."""
     doc = await get_parse_cache_collection().find_one({"_id": source_hash(text)})
@@ -160,41 +129,3 @@ async def find_parse(text: str) -> Workout | None:
         return None
     # Rebuilt through the model so the copy gets its own id and timestamps.
     return Workout(**dict(parsed))
-
-
-async def migrate_wod_parses() -> int:
-    """Move parses stored on WOD cache documents into the shared pool.
-
-    The WOD pre-parse originally kept its result on the cache document. Those
-    parses are just as reusable as any other, so they live in the pool now;
-    this moves existing ones across rather than re-paying for them.
-    """
-    from short_timer.db import get_wod_cache_collection
-
-    collection = get_wod_cache_collection()
-    moved = 0
-    async for doc in collection.find({"parsed": {"$ne": None}}):
-        parsed = doc.get("parsed")
-        text = doc.get("text")
-        if not isinstance(parsed, dict) or not isinstance(text, str) or not text:
-            continue
-        digest = source_hash(text)
-        await get_parse_cache_collection().update_one(
-            {"_id": digest},
-            {
-                # These came from crossfit.com, so they're permanent.
-                "$set": {
-                    "source_hash": digest,
-                    "parsed": dict(parsed),
-                    "source": SOURCE_CROSSFIT,
-                },
-                "$setOnInsert": {"created_at": datetime.now(UTC)},
-            },
-            upsert=True,
-        )
-        await collection.update_one({"_id": doc["_id"]}, {"$unset": {"parsed": ""}})
-        moved += 1
-
-    if moved:
-        logger.info("Migrated %d WOD parse(s) into the shared parse pool.", moved)
-    return moved

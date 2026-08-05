@@ -49,12 +49,20 @@ the builder without starting a timer to find it.
 
 ```bash
 uv sync                       # installs the default + dev dependency groups
-cp .env.example .env          # fill in APP_PASSCODE, SESSION_SECRET, ANTHROPIC_API_KEY
+cp .env.example .env          # fill in ANTHROPIC_API_KEY; the rest have defaults
 docker compose up -d mongo    # or point MONGODB_URI at your own instance
 hatch run serve               # http://localhost:8000, auto-reloading
 ```
 
-Generate a session secret with `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+Registration is invite-only, and invites come from admins, so create the first
+account directly:
+
+```bash
+hatch run python scripts/create_admin.py you@example.com
+```
+
+Outbound email is off by default, so verification and reset links are written
+to the log rather than sent — the whole signup flow works with no provider.
 
 ### Tests and linting
 
@@ -119,9 +127,8 @@ same MongoDB collection the web app uses). See
 `src/short_timer/mcp_server.py`.
 
 It reads and writes one owner's library. Having no session to derive that
-from, it takes the owner from `MCP_OWNER_ID`, which defaults to the user the
-shared passcode logs everyone in as — so it needs setting only once there are
-real accounts.
+from, it takes the owner from `MCP_OWNER_ID`. There is no default: unset, the
+tools refuse rather than guess at someone's library.
 
 ## Frontend setup
 
@@ -137,11 +144,15 @@ runs oxlint.
 
 ## Auth
 
-There's no user model yet — just a single shared passcode (`APP_PASSCODE`).
-Logging in gets you a signed, HttpOnly session cookie; every `/api/workouts*`
-route requires it. Swap in real accounts later without touching the rest of
-the app, since routes only depend on the `require_session` dependency, not
-on any notion of a user.
+Email and password, with invite-only registration. Passwords hash with Argon2id;
+sessions live in the database, so they can actually be revoked. Roles (`user`,
+`staff`, `admin`) gate the privileged surfaces.
+
+Every owner-scoped route depends on `current_owner`, which is the single place
+tenancy is decided — routes never read the session themselves.
+
+See [docs/accounts.md](docs/accounts.md) for the reasoning, the DNS the email
+needs, and what's still open.
 
 ## Note on Python 3.14
 

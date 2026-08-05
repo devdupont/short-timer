@@ -3,13 +3,12 @@ from datetime import date
 import httpx
 import pytest
 import respx
-from httpx import ASGITransport, AsyncClient, Response
+from httpx import AsyncClient, Response
 
 from short_timer import crossfit
-from short_timer.app import app
 from short_timer.crossfit import fetch_wod
 from short_timer.models import Workout, WorkoutMode
-from short_timer.parse_cache import find_parse, migrate_wod_parses
+from short_timer.parse_cache import find_parse
 from short_timer.wod_cache import (
     CACHE_DAYS,
     ensure_wods_parsed,
@@ -25,20 +24,6 @@ _WOD_JSON = {
         "wodRaw": "50-40-30-20-10 reps for time of:\nDouble-unders\nSit-ups",
     }
 }
-
-
-@pytest.fixture
-async def client():
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
-
-
-@pytest.fixture
-async def authed_client(client: AsyncClient) -> AsyncClient:
-    response = await client.post("/api/auth/login", json={"passcode": "test-passcode"})
-    assert response.status_code == 204
-    return client
 
 
 @respx.mock
@@ -153,33 +138,6 @@ async def test_refetch_preserves_parse_but_stale_text_invalidates_it(
     await refresh_wod_cache(force=True)
     assert await ensure_wods_parsed() > 0
     assert calls > first_pass
-
-
-async def test_existing_wod_parses_migrate_into_the_pool() -> None:
-    """Parses stored on WOD documents move across rather than being re-paid for."""
-    from short_timer.db import get_wod_cache_collection
-
-    text = "21-15-9 reps for time of:\nThrusters\nPull-ups"
-    await get_wod_cache_collection().insert_one(
-        {
-            "_id": "2026-07-18",
-            "date": "2026-07-18",
-            "title": "Legacy row",
-            "text": text,
-            "url": "https://www.crossfit.com/260718",
-            "parsed": {"name": "Legacy", "mode": "for_time", "segments": [], "source_text": text},
-        }
-    )
-
-    assert await find_parse(text) is None
-    assert await migrate_wod_parses() == 1
-    found = await find_parse(text)
-    assert found is not None and found.name == "Legacy"
-
-    # Idempotent, and the old copy is cleared so there's one source of truth.
-    assert await migrate_wod_parses() == 0
-    doc = await get_wod_cache_collection().find_one({"_id": "2026-07-18"})
-    assert doc is not None and "parsed" not in doc
 
 
 @respx.mock

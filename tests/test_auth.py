@@ -2,7 +2,6 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from short_timer.auth import check_passcode
 from short_timer.config import get_settings
 from short_timer.db import get_sessions_collection
 from short_timer.sessions import (
@@ -19,11 +18,6 @@ def _clear_settings_cache() -> None:
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
-
-
-def test_check_passcode() -> None:
-    assert check_passcode("test-passcode") is True
-    assert check_passcode("wrong") is False
 
 
 # --- The cookie's name -------------------------------------------------------

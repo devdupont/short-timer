@@ -24,7 +24,6 @@ from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 
-from short_timer.auth import DEFAULT_OWNER_ID
 from short_timer.config import get_settings
 from short_timer.db import get_workouts_collection
 from short_timer.llm import parse_workout_text
@@ -36,8 +35,17 @@ mcp = MCPServer("short-timer")
 
 
 def _owner_id() -> str:
-    """The library this server acts on."""
-    return get_settings().mcp_owner_id or DEFAULT_OWNER_ID
+    """The library this server acts on.
+
+    There is no default any more. While login was a shared passcode, falling
+    back to the one account everybody used was harmless; now that accounts are
+    real, guessing an owner would mean reading or writing somebody's library
+    by accident. An unconfigured server should refuse, not pick.
+    """
+    owner_id = get_settings().mcp_owner_id
+    if not owner_id:
+        raise RuntimeError("MCP_OWNER_ID is not set; the MCP server has no library to act on.")
+    return owner_id
 
 
 def _to_document(workout: Workout) -> dict[str, Any]:

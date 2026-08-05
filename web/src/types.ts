@@ -189,12 +189,50 @@ export interface UserConfig {
   feeds: FeedPref[];
 }
 
+export type Role = "user" | "staff" | "admin";
+
 export interface Me {
   id: string;
+  email: string | null;
+  email_verified: boolean;
+  role: Role;
   display_name: string;
   config: UserConfig;
   /** False when the server has no encryption keys, so credentials can't be saved. */
   secrets_available: boolean;
+}
+
+/** What the register screen learns about an invite before asking for a password. */
+export interface InviteCheck {
+  valid: boolean;
+  /** Set for an address-bound invite: the form pre-fills and locks this. */
+  email: string | null;
+  reason: string | null;
+}
+
+export interface Invite {
+  id: string;
+  email: string | null;
+  role: Role;
+  created_by: string;
+  created_at: string;
+  expires_at: string;
+  redeemed_at: string | null;
+  redeemed_by: string | null;
+}
+
+/** The one and only response carrying an invite token. */
+export interface InviteCreated {
+  invite: Invite;
+  token: string;
+  link: string;
+  emailed: boolean;
+}
+
+export interface SessionView {
+  created_at: string | null;
+  last_seen_at: string | null;
+  user_agent: string | null;
 }
 
 /**

@@ -8,27 +8,26 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from short_timer import concept2_cache, hybrid_cache
-from short_timer.auth import DEFAULT_OWNER_ID
 from short_timer.config import get_settings
-from short_timer.db import (
-    backfill_owner_ids,
-    backfill_source_hashes,
-    ensure_indexes,
-    get_database,
-)
+from short_timer.db import ensure_indexes, get_database
 from short_timer.errors import register_error_handlers
 from short_timer.gym_cache import (
     REFRESH_INTERVAL_SECONDS as GYM_REFRESH_INTERVAL_SECONDS,
 )
 from short_timer.gym_cache import refresh_all_configured
 from short_timer.metrics import record_feed_refresh
-from short_timer.parse_cache import (
-    backfill_parse_sources,
-    migrate_wod_parses,
-    prune_expired_parses,
+from short_timer.parse_cache import prune_expired_parses
+from short_timer.routers import (
+    admin,
+    auth,
+    concept2,
+    gym,
+    hybrid,
+    me,
+    metrics,
+    wods,
+    workouts,
 )
-from short_timer.routers import auth, concept2, gym, hybrid, me, metrics, wods, workouts
-from short_timer.users import ensure_default_user
 from short_timer.wod_cache import (
     REFRESH_INTERVAL_SECONDS,
     ensure_wods_parsed,
@@ -92,24 +91,14 @@ async def _prune_parses_monthly() -> None:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Best-effort: a database that's slow or unreachable at boot shouldn't
     # stop the app from serving.
+    #
+    # The pre-accounts backfills that used to run here are gone. They existed
+    # to repair rows written before `source_hash`, `owner_id` and parse
+    # provenance existed, and no such row can exist any more: accounts landed
+    # on an empty database, so every document has been written by code that
+    # sets all three.
     try:
         await ensure_indexes()
-        # Seeded with id == DEFAULT_OWNER_ID, so everything backfilled below
-        # already belongs to it.
-        await ensure_default_user()
-        hashes = await backfill_source_hashes()
-        owners = await backfill_owner_ids(DEFAULT_OWNER_ID)
-        moved = await migrate_wod_parses()
-        labelled = await backfill_parse_sources()
-        if hashes or owners or moved or labelled:
-            logger.info(
-                "Backfilled source_hash on %d workout(s), owner_id on %d, moved %d "
-                "WOD parse(s) into the shared pool, labelled %d for retention.",
-                hashes,
-                owners,
-                moved,
-                labelled,
-            )
     except Exception:  # startup maintenance is non-critical
         logger.exception("Skipped startup database maintenance.")
 
@@ -184,6 +173,7 @@ app.include_router(concept2.router)
 app.include_router(hybrid.router)
 app.include_router(gym.router)
 app.include_router(metrics.router)
+app.include_router(admin.router)
 
 
 @app.get("/api/health")

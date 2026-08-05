@@ -71,14 +71,17 @@ az containerapp secret set \
   --secrets \
     mongodb-uri="mongodb+srv://<user>:<password>@<cluster>/?retryWrites=true&w=majority" \
     anthropic-api-key="<your key>" \
-    app-passcode="<the shared passcode>"
+    postmark-server-token="<from Postmark's Server API Tokens tab>"
 
 az containerapp update \
   --name "$APP" --resource-group "$RG" \
   --set-env-vars \
     MONGODB_URI=secretref:mongodb-uri \
     ANTHROPIC_API_KEY=secretref:anthropic-api-key \
-    APP_PASSCODE=secretref:app-passcode \
+    POSTMARK_SERVER_TOKEN=secretref:postmark-server-token \
+    EMAIL_ENABLED=true \
+    EMAIL_FROM="shortimer <no-reply@send.shortimer.com>" \
+    PUBLIC_BASE_URL=https://shortimer.com \
     MONGODB_DB_NAME=short_timer \
     SESSION_COOKIE_SECURE=true \
     CORS_ORIGINS=https://shortimer.com \

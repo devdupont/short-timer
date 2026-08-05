@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { ApiError, getGymHealth, getMe, listGymProviders, updateConfig } from "../api";
+import { Account } from "./Account";
 import { FEED_SPECS } from "../feeds";
 import type {
   FeedPref,
@@ -417,6 +418,8 @@ export function Settings() {
 
       {error && <p className="error">{error}</p>}
       {status && <p className="field-hint">{status}</p>}
+
+      {me && <Account me={me} />}
     </div>
   );
 }

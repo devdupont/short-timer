@@ -1,26 +1,13 @@
 import anthropic
 import httpx
 import pytest
+from conftest import TEST_EMAIL, TEST_PASSWORD
 from httpx import ASGITransport, AsyncClient
 
 from short_timer.app import app
 from short_timer.config import get_settings
-from short_timer.models import Workout, WorkoutMode
+from short_timer.models import User, Workout, WorkoutMode
 from short_timer.ratelimit import RateLimit, enforce
-
-
-@pytest.fixture
-async def client():
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
-
-
-@pytest.fixture
-async def authed_client(client: AsyncClient) -> AsyncClient:
-    response = await client.post("/api/auth/login", json={"passcode": "test-passcode"})
-    assert response.status_code == 204
-    return client
 
 
 @pytest.fixture(autouse=True)
@@ -50,11 +37,13 @@ async def test_limits_are_tracked_per_subject() -> None:
     await enforce(limit, "subject-b")
 
 
-async def test_repeated_bad_passcodes_are_throttled(client: AsyncClient) -> None:
-    """The shared passcode is guessable without a cap on attempts."""
+async def test_repeated_bad_passwords_are_throttled(client: AsyncClient, account: User) -> None:
+    """A password is guessable without a cap on attempts."""
     attempts = get_settings().login_attempts_per_15_min
     statuses = [
-        (await client.post("/api/auth/login", json={"passcode": "wrong"})).status_code
+        (
+            await client.post("/api/auth/login", json={"email": TEST_EMAIL, "password": "wrong"})
+        ).status_code
         for _ in range(attempts + 2)
     ]
     assert statuses[0] == 401  # rejected on merit
@@ -62,25 +51,52 @@ async def test_repeated_bad_passcodes_are_throttled(client: AsyncClient) -> None
 
 
 async def test_successful_logins_do_not_consume_the_attempt_budget(
-    client: AsyncClient,
+    client: AsyncClient, account: User
 ) -> None:
     """Everyone at a gym shares one WiFi IP; they mustn't lock each other out."""
     attempts = get_settings().login_attempts_per_15_min
     for _ in range(attempts * 3):
-        response = await client.post("/api/auth/login", json={"passcode": "test-passcode"})
+        response = await client.post(
+            "/api/auth/login", json={"email": TEST_EMAIL, "password": TEST_PASSWORD}
+        )
         assert response.status_code == 204
 
 
-async def test_a_guesser_is_locked_out_without_blocking_the_real_passcode(
-    client: AsyncClient,
+async def test_one_account_is_throttled_across_many_addresses(
+    client: AsyncClient, account: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    attempts = get_settings().login_attempts_per_15_min
-    for _ in range(attempts):
-        await client.post("/api/auth/login", json={"passcode": "wrong"})
+    """Per-IP limits alone would let a botnet spray one account freely."""
+    monkeypatch.setenv("TRUSTED_PROXY_HOPS", "1")
+    get_settings.cache_clear()
 
-    # Further guesses are refused outright.
-    blocked = await client.post("/api/auth/login", json={"passcode": "wrong"})
-    assert blocked.status_code == 429
+    attempts = get_settings().login_attempts_per_15_min
+    statuses = []
+    for i in range(attempts + 2):
+        # A different source address every time, so only the per-account limit
+        # can be what stops this.
+        response = await client.post(
+            "/api/auth/login",
+            json={"email": TEST_EMAIL, "password": "wrong"},
+            headers={"X-Forwarded-For": f"203.0.113.{i}, 10.0.0.1"},
+        )
+        statuses.append(response.status_code)
+
+    assert statuses[0] == 401
+    assert statuses[-1] == 429
+
+
+async def test_an_unknown_address_fails_the_same_way_as_a_wrong_password(
+    client: AsyncClient, account: User
+) -> None:
+    """Login must not tell an attacker which addresses have accounts."""
+    unknown = await client.post(
+        "/api/auth/login", json={"email": "nobody@example.com", "password": TEST_PASSWORD}
+    )
+    wrong = await client.post(
+        "/api/auth/login", json={"email": TEST_EMAIL, "password": "wrong-password"}
+    )
+    assert unknown.status_code == wrong.status_code == 401
+    assert unknown.json()["detail"] == wrong.json()["detail"]
 
 
 async def test_oversized_paste_is_rejected_before_the_model(
@@ -121,6 +137,8 @@ async def test_upstream_failures_map_to_useful_statuses(
     monkeypatch: pytest.MonkeyPatch,
     error: Exception,
     expected_status: int,
+    account: User,
+    sign_in_as,
 ) -> None:
     """A parser outage should be a clear, retryable answer — not a bare 500."""
 
@@ -131,7 +149,7 @@ async def test_upstream_failures_map_to_useful_statuses(
 
     transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as raw:
-        await raw.post("/api/auth/login", json={"passcode": "test-passcode"})
+        await sign_in_as(raw, account.id)
         response = await raw.post("/api/workouts/parse", json={"text": "Fran\n21-15-9"})
 
     assert response.status_code == expected_status
@@ -142,6 +160,8 @@ async def test_upstream_failures_map_to_useful_statuses(
 
 async def test_unexpected_errors_do_not_leak_internals(
     monkeypatch: pytest.MonkeyPatch,
+    account: User,
+    sign_in_as,
 ) -> None:
     async def boom(text: str, name_hint: str | None = None, **_: object) -> Workout:
         raise RuntimeError("secret internal detail: connection string xyz")
@@ -150,7 +170,7 @@ async def test_unexpected_errors_do_not_leak_internals(
 
     transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as raw:
-        await raw.post("/api/auth/login", json={"passcode": "test-passcode"})
+        await sign_in_as(raw, account.id)
         response = await raw.post("/api/workouts/parse", json={"text": "Fran\n21-15-9"})
 
     assert response.status_code == 500
@@ -172,6 +192,8 @@ async def test_seeded_workout_model_still_round_trips() -> None:
 
 async def test_unexpected_errors_still_carry_cors_headers(
     monkeypatch: pytest.MonkeyPatch,
+    account: User,
+    sign_in_as,
 ) -> None:
     """A 500 the browser can't read is a 500 the user never sees.
 
@@ -190,7 +212,7 @@ async def test_unexpected_errors_still_carry_cors_headers(
     origin = get_settings().cors_origins[0]
     transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as raw:
-        await raw.post("/api/auth/login", json={"passcode": "test-passcode"})
+        await sign_in_as(raw, account.id)
         response = await raw.post(
             "/api/workouts/parse",
             json={"text": "Fran\n21-15-9"},

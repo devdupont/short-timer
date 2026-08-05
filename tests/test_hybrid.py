@@ -2,9 +2,8 @@ from datetime import date
 
 import pytest
 import respx
-from httpx import ASGITransport, AsyncClient, Response
+from httpx import AsyncClient, Response
 
-from short_timer.app import app
 from short_timer.db import get_hybrid_cache_collection
 from short_timer.hybrid import PAGE_URL, is_rest_day, parse_rotation
 from short_timer.hybrid_cache import (
@@ -42,20 +41,6 @@ _PAGE = (
     )
     + "</body></html>"
 )
-
-
-@pytest.fixture
-async def client():
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
-
-
-@pytest.fixture
-async def authed_client(client: AsyncClient) -> AsyncClient:
-    response = await client.post("/api/auth/login", json={"passcode": "test-passcode"})
-    assert response.status_code == 204
-    return client
 
 
 def test_parse_reads_the_whole_rotation() -> None:

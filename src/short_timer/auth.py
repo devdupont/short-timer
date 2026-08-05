@@ -6,18 +6,15 @@ It deliberately knows nothing about user *records*; resolving an id to an
 account, and anything role-shaped, lives in `users.py`, which is what keeps the
 import direction one-way.
 
-Authentication is still a single shared passcode. What changed is that a login
-now mints a revocable server-side session rather than a signed cookie that
-stays valid until it expires no matter what.
+There is no longer a shared passcode, and no default owner to fall back to:
+every session names a real account, and a request without one is simply not
+authenticated.
 """
 
 from fastapi import Cookie, HTTPException, Request, Response, status
 
 from short_timer.config import get_settings
 from short_timer.sessions import create_session, resolve_session, revoke_session
-
-#: Owner every record belongs to while there's a single shared passcode.
-DEFAULT_OWNER_ID = "default"
 
 _COOKIE_BASE_NAME = "short_timer_session"
 
@@ -43,10 +40,6 @@ def _cookie_name() -> str:
 #: Resolved once at import: FastAPI needs a fixed alias to bind the parameter
 #: to, so flipping `session_cookie_secure` mid-process won't be noticed.
 SESSION_COOKIE_NAME = _cookie_name()
-
-
-def check_passcode(passcode: str) -> bool:
-    return passcode == get_settings().app_passcode
 
 
 async def start_session(response: Response, request: Request, user_id: str) -> str:

@@ -2,16 +2,22 @@
 
 import pytest
 
-from short_timer.auth import DEFAULT_OWNER_ID
 from short_timer.config import get_settings
 from short_timer.db import get_workouts_collection
 from short_timer.mcp_server import create_timer_workout, get_workout, search_workouts
 from short_timer.models import Workout, WorkoutMode
 
+#: The library this MCP server is pointed at. There is no default owner any
+#: more, so the deployment has to name one.
+MCP_OWNER = "mcp-owner"
+
 
 @pytest.fixture(autouse=True)
-def _fresh_settings() -> None:
-    """Drop cached settings so a test can change MCP_OWNER_ID."""
+def _fresh_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point the server at a library, and drop cached settings around it."""
+    monkeypatch.setenv("MCP_OWNER_ID", MCP_OWNER)
+    get_settings.cache_clear()
+    yield
     get_settings.cache_clear()
 
 
@@ -26,7 +32,7 @@ async def _insert(workout_id: str, name: str, owner_id: str, **fields: object) -
 
 
 async def test_search_only_sees_its_own_owners_workouts() -> None:
-    await _insert("mine", "Fran", DEFAULT_OWNER_ID)
+    await _insert("mine", "Fran", MCP_OWNER)
     await _insert("theirs", "Fran", "another-user")
 
     results = await search_workouts(query="Fran")
@@ -37,14 +43,14 @@ async def test_search_only_sees_its_own_owners_workouts() -> None:
 
 
 async def test_search_by_category_is_owner_scoped_too() -> None:
-    await _insert("mine", "Cindy", DEFAULT_OWNER_ID, category="girls")
+    await _insert("mine", "Cindy", MCP_OWNER, category="girls")
     await _insert("theirs", "Not Mine", "another-user", category="girls")
 
     assert [doc["id"] for doc in await search_workouts(category="girls")] == ["mine"]
 
 
 async def test_search_treats_the_query_literally() -> None:
-    await _insert("mine", "5+ rounds", DEFAULT_OWNER_ID)
+    await _insert("mine", "5+ rounds", MCP_OWNER)
 
     assert [doc["id"] for doc in await search_workouts(query="5+")] == ["mine"]
     assert await search_workouts(query=".*") == []
@@ -66,7 +72,7 @@ async def test_created_workouts_are_owned() -> None:
 
     doc = await get_workouts_collection().find_one({"_id": created["id"]})
     assert doc is not None
-    assert doc["owner_id"] == DEFAULT_OWNER_ID
+    assert doc["owner_id"] == MCP_OWNER
 
     # ...and it comes back through the server's own read path.
     assert (await get_workout(created["id"]))["name"] == "Ladder"  # type: ignore[index]
@@ -77,7 +83,7 @@ async def test_owner_is_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MCP_OWNER_ID", "someone-else")
     get_settings.cache_clear()
 
-    await _insert("default-user", "Fran", DEFAULT_OWNER_ID)
+    await _insert("default-user", "Fran", MCP_OWNER)
     created = await create_timer_workout(name="Fran", mode="for_time", segments=[])
 
     assert [doc["id"] for doc in await search_workouts(query="Fran")] == [created["id"]]

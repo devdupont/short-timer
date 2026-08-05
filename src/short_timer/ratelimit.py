@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 
 from fastapi import Depends, HTTPException, Request, status
 
-from short_timer.auth import DEFAULT_OWNER_ID, current_owner
+from short_timer.auth import current_owner
 from short_timer.config import get_settings
 from short_timer.db import get_rate_limit_collection
 
@@ -41,13 +41,16 @@ class RateLimit:
 def subject_for(request: Request, owner_id: str) -> str:
     """Who a limit is counted against.
 
-    Once accounts exist this is the user, which is what we actually want to
-    limit. Until then every session shares one owner, so falling back to the
-    client address keeps one noisy visitor from consuming everyone's budget.
+    The account, now that every session names a real one. That's what we
+    actually want to limit: an account is what has a budget, and unlike an
+    address it doesn't lump a whole gym's WiFi together or let one person
+    reset their quota by switching networks.
+
+    `request` is still taken because the unauthenticated limits — login,
+    registration, forgot-password — have no account to charge and fall back to
+    the address; see `client_ip`.
     """
-    if owner_id != DEFAULT_OWNER_ID:
-        return f"owner:{owner_id}"
-    return f"ip:{client_ip(request)}"
+    return f"owner:{owner_id}"
 
 
 def client_ip(request: Request) -> str:

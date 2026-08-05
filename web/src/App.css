@@ -1500,3 +1500,63 @@ button {
 .auth-card .primary-button {
   width: 100%;
 }
+
+/* --- Account settings ------------------------------------------------------
+   The auth screens and the account panel reuse the form styles above; these
+   are the three pieces they add. */
+
+/* A button that reads as a link: the secondary actions on the auth screens
+   ("forgot your password?", "back to sign in") shouldn't compete with the
+   submit button next to them. */
+.link-button {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  display: inline-block;
+  font: inherit;
+  font-size: 13px;
+  margin-top: 12px;
+  padding: 0;
+  text-align: left;
+  text-decoration: underline;
+}
+
+.link-button:hover {
+  color: var(--text-h);
+}
+
+.settings-section {
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 32px;
+  padding-top: 24px;
+}
+
+.settings-section h3 {
+  font-size: 14px;
+  margin: 12px 0 0;
+}
+
+.session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.session-list li {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* A user-agent string is long and arbitrary; wrap it rather than letting it
+     push the panel wide on a phone. */
+  overflow-wrap: anywhere;
+  padding: 10px 12px;
+}

@@ -3,10 +3,9 @@ from datetime import date
 import httpx
 import pytest
 import respx
-from httpx import ASGITransport, AsyncClient, Response
+from httpx import AsyncClient, Response
 
 from short_timer import concept2
-from short_timer.app import app
 from short_timer.concept2 import fetch_wod, parse_wod_page
 from short_timer.concept2_cache import (
     CACHE_DAYS,
@@ -44,20 +43,6 @@ def _page(title: str, description: str | None = "Seven alternating intervals.") 
 
 _TITLE = "2/3/2/3/2/3/2 minutes with 1 minute rest"
 _URL_PATTERN = r"https://log\.concept2\.com/wod/.*"
-
-
-@pytest.fixture
-async def client():
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
-
-
-@pytest.fixture
-async def authed_client(client: AsyncClient) -> AsyncClient:
-    response = await client.post("/api/auth/login", json={"passcode": "test-passcode"})
-    assert response.status_code == 204
-    return client
 
 
 def test_parse_keeps_heading_and_description() -> None:

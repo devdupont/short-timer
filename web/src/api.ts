@@ -1,10 +1,15 @@
 import type {
   Concept2WodEntry,
+  Invite,
+  InviteCheck,
+  InviteCreated,
   GymConnectionHealth,
   GymFeed,
   GymProviderInfo,
   HybridWodEntry,
   Me,
+  Role,
+  SessionView,
   UserConfigUpdate,
   WodEntry,
   Workout,
@@ -43,12 +48,102 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export { ApiError };
 
-export function login(passcode: string): Promise<void> {
-  return request("/api/auth/login", { method: "POST", body: JSON.stringify({ passcode }) });
+export function login(email: string, password: string): Promise<void> {
+  return request("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
 }
 
 export function logout(): Promise<void> {
   return request("/api/auth/logout", { method: "POST" });
+}
+
+/** End every session for this account, including this one. */
+export function logoutEverywhere(): Promise<void> {
+  return request("/api/auth/logout-all", { method: "POST" });
+}
+
+/** Whether an invite link is usable, and which address it's bound to. */
+export function checkInvite(token: string): Promise<InviteCheck> {
+  return request(`/api/auth/invite?token=${encodeURIComponent(token)}`);
+}
+
+export function register(input: {
+  inviteToken: string;
+  email: string;
+  password: string;
+  displayName: string;
+}): Promise<void> {
+  return request("/api/auth/register", {
+    method: "POST",
+    body: JSON.stringify({
+      invite_token: input.inviteToken,
+      email: input.email,
+      password: input.password,
+      display_name: input.displayName,
+    }),
+  });
+}
+
+export function verifyEmail(token: string): Promise<Me> {
+  return request("/api/auth/verify", { method: "POST", body: JSON.stringify({ token }) });
+}
+
+export function resendVerification(): Promise<void> {
+  return request("/api/auth/resend-verification", { method: "POST" });
+}
+
+/**
+ * Always resolves, whether or not the address has an account — the server
+ * deliberately answers the same way either way, so the UI must not imply it
+ * learned anything.
+ */
+export function forgotPassword(email: string): Promise<void> {
+  return request("/api/auth/forgot-password", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export function resetPassword(token: string, password: string): Promise<void> {
+  return request("/api/auth/reset-password", {
+    method: "POST",
+    body: JSON.stringify({ token, password }),
+  });
+}
+
+export function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  return request("/api/me/password", {
+    method: "POST",
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
+}
+
+export function listSessions(): Promise<SessionView[]> {
+  return request("/api/me/sessions");
+}
+
+/** Sign out everywhere else, keeping this session. */
+export function endOtherSessions(): Promise<void> {
+  return request("/api/me/sessions", { method: "DELETE" });
+}
+
+// --- Admin -----------------------------------------------------------------
+
+export function listInvites(): Promise<Invite[]> {
+  return request("/api/admin/invites");
+}
+
+export function createInvite(email: string | null, role: Role): Promise<InviteCreated> {
+  return request("/api/admin/invites", {
+    method: "POST",
+    body: JSON.stringify({ email, role }),
+  });
+}
+
+export function revokeInvite(id: string): Promise<void> {
+  return request(`/api/admin/invites/${id}`, { method: "DELETE" });
 }
 
 /** The signed-in user and their config. Credentials come back masked, never in full. */

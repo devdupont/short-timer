@@ -3,10 +3,9 @@
 from typing import ClassVar
 
 import pytest
-from httpx import ASGITransport, AsyncClient
+from conftest import TEST_EMAIL, TEST_PASSWORD
+from httpx import AsyncClient
 
-from short_timer.app import app
-from short_timer.auth import DEFAULT_OWNER_ID
 from short_timer.config import get_settings
 from short_timer.db import (
     get_events_collection,
@@ -21,25 +20,12 @@ from short_timer.metrics import (
     model_spend,
     parse_breakdown,
     record,
+    record_login,
     record_model_call,
     record_parse,
 )
-from short_timer.models import Role, Workout, WorkoutMode
+from short_timer.models import Role, User, Workout, WorkoutMode
 from short_timer.users import get_user
-
-
-@pytest.fixture
-async def client():
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
-
-
-@pytest.fixture
-async def authed_client(client: AsyncClient) -> AsyncClient:
-    response = await client.post("/api/auth/login", json={"passcode": "test-passcode"})
-    assert response.status_code == 204
-    return client
 
 
 @pytest.fixture(autouse=True)
@@ -161,9 +147,11 @@ async def test_one_users_events_do_not_appear_in_anothers_breakdown() -> None:
 # --- The endpoints -----------------------------------------------------------
 
 
-async def test_me_metrics_reports_the_callers_own_usage(authed_client: AsyncClient) -> None:
-    await record_parse(outcome=ParseOutcome.POOL_HIT, owner_id=DEFAULT_OWNER_ID)
-    await record_parse(outcome=ParseOutcome.MODEL_CALL, owner_id=DEFAULT_OWNER_ID)
+async def test_me_metrics_reports_the_callers_own_usage(
+    authed_client: AsyncClient, account: User
+) -> None:
+    await record_parse(outcome=ParseOutcome.POOL_HIT, owner_id=account.id)
+    await record_parse(outcome=ParseOutcome.MODEL_CALL, owner_id=account.id)
     await record_parse(outcome=ParseOutcome.MODEL_CALL, owner_id="someone-else")
 
     body = (await authed_client.get("/api/metrics/me")).json()
@@ -173,10 +161,10 @@ async def test_me_metrics_reports_the_callers_own_usage(authed_client: AsyncClie
     assert body["parses"]["cache_hit_rate"] == 0.5
 
 
-async def test_me_metrics_never_reports_cost(authed_client: AsyncClient) -> None:
+async def test_me_metrics_never_reports_cost(authed_client: AsyncClient, account: User) -> None:
     """Spend is the operator's business, not every session-holder's."""
     await record_model_call(
-        model="claude-sonnet-5", input_tokens=5000, output_tokens=500, owner_id=DEFAULT_OWNER_ID
+        model="claude-sonnet-5", input_tokens=5000, output_tokens=500, owner_id=account.id
     )
     body = (await authed_client.get("/api/metrics/me")).text
     assert "cost" not in body
@@ -184,10 +172,10 @@ async def test_me_metrics_never_reports_cost(authed_client: AsyncClient) -> None
 
 
 async def test_failed_parses_do_not_move_the_cache_hit_rate(
-    authed_client: AsyncClient,
+    authed_client: AsyncClient, account: User
 ) -> None:
-    await record_parse(outcome=ParseOutcome.POOL_HIT, owner_id=DEFAULT_OWNER_ID)
-    await record_parse(outcome=ParseOutcome.FAILED, owner_id=DEFAULT_OWNER_ID)
+    await record_parse(outcome=ParseOutcome.POOL_HIT, owner_id=account.id)
+    await record_parse(outcome=ParseOutcome.FAILED, owner_id=account.id)
 
     parses = (await authed_client.get("/api/metrics/me")).json()["parses"]
     assert parses["failed"] == 1
@@ -206,21 +194,23 @@ async def test_operator_metrics_are_off_by_default(authed_client: AsyncClient) -
 
 
 async def test_operator_metrics_open_for_an_allowlisted_user(
-    authed_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+    authed_client: AsyncClient, monkeypatch: pytest.MonkeyPatch, account: User
 ) -> None:
-    monkeypatch.setenv("METRICS_ADMIN_USER_IDS", DEFAULT_OWNER_ID)
+    monkeypatch.setenv("METRICS_ADMIN_USER_IDS", account.id)
     get_settings.cache_clear()
 
     await record_model_call(
         model="claude-sonnet-5", input_tokens=2850, output_tokens=500, owner_id="anyone"
     )
+    await record_login(owner_id=account.id)
+
     response = await authed_client.get("/api/metrics/operator")
     assert response.status_code == 200
     body = response.json()
     assert body["spend"]["estimated_cost_usd"] > 0
     assert body["spend"]["cost_is_complete"] is True
-    # Two distinct owners: "anyone" above, and the default user whose login
-    # the fixture recorded. Activity of any kind counts, not just spend.
+    # Two distinct owners: "anyone", who spent, and the caller, who only
+    # logged in. Activity of any kind counts, not just spend.
     assert body["active_owners"] == 2
 
 
@@ -237,35 +227,41 @@ async def _set_role(user_id: str, role: str) -> None:
     await get_users_collection().update_one({"_id": user_id}, {"$set": {"role": role}})
 
 
-async def test_operator_metrics_open_for_an_admin_role(authed_client: AsyncClient) -> None:
+async def test_operator_metrics_open_for_an_admin_role(
+    authed_client: AsyncClient, account: User
+) -> None:
     """The role on the record is the mechanism, with no env var set."""
-    await _set_role(DEFAULT_OWNER_ID, "admin")
+    await _set_role(account.id, "admin")
     assert (await authed_client.get("/api/metrics/operator")).status_code == 200
 
 
-async def test_operator_metrics_open_for_staff(authed_client: AsyncClient) -> None:
+async def test_operator_metrics_open_for_staff(authed_client: AsyncClient, account: User) -> None:
     """Support needs the privileged metrics without being the account owner."""
-    await _set_role(DEFAULT_OWNER_ID, "staff")
+    await _set_role(account.id, "staff")
     assert (await authed_client.get("/api/metrics/operator")).status_code == 200
 
 
-async def test_plain_user_role_is_refused(authed_client: AsyncClient) -> None:
-    await _set_role(DEFAULT_OWNER_ID, "user")
+async def test_plain_user_role_is_refused(authed_client: AsyncClient, account: User) -> None:
+    await _set_role(account.id, "user")
     assert (await authed_client.get("/api/metrics/operator")).status_code == 404
 
 
-async def test_the_seeded_passcode_user_is_not_privileged(authed_client: AsyncClient) -> None:
+async def test_the_seeded_passcode_user_is_not_privileged(
+    authed_client: AsyncClient, account: User
+) -> None:
     """Everyone shares the passcode account, so it must not read the bill."""
-    user = await get_user(DEFAULT_OWNER_ID)
+    user = await get_user(account.id)
     assert user is not None
     assert user.role is Role.USER
     assert (await authed_client.get("/api/metrics/operator")).status_code == 404
 
 
-async def test_a_disabled_account_is_refused_everywhere(authed_client: AsyncClient) -> None:
+async def test_a_disabled_account_is_refused_everywhere(
+    authed_client: AsyncClient, account: User
+) -> None:
     """Status is a separate axis from role: an admin who is disabled is out."""
     await get_users_collection().update_one(
-        {"_id": DEFAULT_OWNER_ID}, {"$set": {"role": "admin", "status": "disabled"}}
+        {"_id": account.id}, {"$set": {"role": "admin", "status": "disabled"}}
     )
     assert (await authed_client.get("/api/metrics/operator")).status_code == 403
 
@@ -278,11 +274,11 @@ async def test_the_window_is_bounded(authed_client: AsyncClient) -> None:
 # --- Instrumentation, end to end ---------------------------------------------
 
 
-async def test_starting_a_workout_is_recorded(authed_client: AsyncClient) -> None:
+async def test_starting_a_workout_is_recorded(authed_client: AsyncClient, account: User) -> None:
     workout = Workout(name="Fran", mode=WorkoutMode.FOR_TIME)
     doc = workout.model_dump(mode="json")
     doc["_id"] = doc.pop("id")
-    doc["owner_id"] = DEFAULT_OWNER_ID
+    doc["owner_id"] = account.id
     await get_workouts_collection().insert_one(doc)
 
     response = await authed_client.post(f"/api/workouts/{workout.id}/started")
@@ -304,18 +300,21 @@ async def test_starting_another_owners_workout_is_a_404(authed_client: AsyncClie
     assert await get_events_collection().count_documents({"type": "workout_started"}) == 0
 
 
-async def test_logging_in_is_recorded(client: AsyncClient) -> None:
-    await client.post("/api/auth/login", json={"passcode": "test-passcode"})
+async def test_logging_in_is_recorded(client: AsyncClient, account: User) -> None:
+    response = await client.post(
+        "/api/auth/login", json={"email": TEST_EMAIL, "password": TEST_PASSWORD}
+    )
+    assert response.status_code == 204
     assert await get_events_collection().count_documents({"type": "login"}) == 1
 
 
-async def test_a_rejected_login_is_not_recorded(client: AsyncClient) -> None:
-    await client.post("/api/auth/login", json={"passcode": "wrong"})
+async def test_a_rejected_login_is_not_recorded(client: AsyncClient, account: User) -> None:
+    await client.post("/api/auth/login", json={"email": TEST_EMAIL, "password": "wrong"})
     assert await get_events_collection().count_documents({"type": "login"}) == 0
 
 
 async def test_a_parse_records_both_the_outcome_and_the_tokens(
-    authed_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+    authed_client: AsyncClient, monkeypatch: pytest.MonkeyPatch, account: User
 ) -> None:
     """The two halves of the cost picture: what was asked for, and what it cost."""
 
@@ -357,7 +356,7 @@ async def test_a_parse_records_both_the_outcome_and_the_tokens(
     assert call is not None
     assert call["data"]["input_tokens"] == 2850
     assert call["data"]["purpose"] == "parse"
-    assert call["owner_id"] == DEFAULT_OWNER_ID
+    assert call["owner_id"] == account.id
 
 
 async def test_a_cached_parse_costs_nothing_and_says_so(
@@ -382,11 +381,11 @@ async def test_a_cached_parse_costs_nothing_and_says_so(
     assert await events.count_documents({"type": "model_call"}) == 0
 
 
-async def test_completing_a_workout_is_recorded(authed_client: AsyncClient) -> None:
+async def test_completing_a_workout_is_recorded(authed_client: AsyncClient, account: User) -> None:
     workout = Workout(name="Fran", mode=WorkoutMode.FOR_TIME)
     doc = workout.model_dump(mode="json")
     doc["_id"] = doc.pop("id")
-    doc["owner_id"] = DEFAULT_OWNER_ID
+    doc["owner_id"] = account.id
     await get_workouts_collection().insert_one(doc)
 
     await authed_client.post(f"/api/workouts/{workout.id}/started")
@@ -407,13 +406,13 @@ async def test_completing_a_workout_is_recorded(authed_client: AsyncClient) -> N
 
 
 async def test_abandoned_workouts_show_up_as_a_lower_completion_rate(
-    authed_client: AsyncClient,
+    authed_client: AsyncClient, account: User
 ) -> None:
     """The number a start count alone can't give you."""
     workout = Workout(name="Murph", mode=WorkoutMode.FOR_TIME)
     doc = workout.model_dump(mode="json")
     doc["_id"] = doc.pop("id")
-    doc["owner_id"] = DEFAULT_OWNER_ID
+    doc["owner_id"] = account.id
     await get_workouts_collection().insert_one(doc)
 
     for _ in range(4):
@@ -424,12 +423,14 @@ async def test_abandoned_workouts_show_up_as_a_lower_completion_rate(
     assert body["completion_rate"] == 0.25
 
 
-async def test_a_completion_rate_cannot_exceed_one(authed_client: AsyncClient) -> None:
+async def test_a_completion_rate_cannot_exceed_one(
+    authed_client: AsyncClient, account: User
+) -> None:
     """A workout started before the window and finished inside it would."""
     workout = Workout(name="Cindy", mode=WorkoutMode.AMRAP)
     doc = workout.model_dump(mode="json")
     doc["_id"] = doc.pop("id")
-    doc["owner_id"] = DEFAULT_OWNER_ID
+    doc["owner_id"] = account.id
     await get_workouts_collection().insert_one(doc)
 
     await authed_client.post(f"/api/workouts/{workout.id}/started")
@@ -441,12 +442,14 @@ async def test_a_completion_rate_cannot_exceed_one(authed_client: AsyncClient) -
     assert (await authed_client.get("/api/metrics/me")).json()["completion_rate"] == 1.0
 
 
-async def test_an_implausible_elapsed_time_is_rejected(authed_client: AsyncClient) -> None:
+async def test_an_implausible_elapsed_time_is_rejected(
+    authed_client: AsyncClient, account: User
+) -> None:
     """A tab left open overnight would drag every average it touches."""
     workout = Workout(name="Fran", mode=WorkoutMode.FOR_TIME)
     doc = workout.model_dump(mode="json")
     doc["_id"] = doc.pop("id")
-    doc["owner_id"] = DEFAULT_OWNER_ID
+    doc["owner_id"] = account.id
     await get_workouts_collection().insert_one(doc)
 
     response = await authed_client.post(

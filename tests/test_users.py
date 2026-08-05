@@ -1,14 +1,12 @@
 import pytest
-from httpx import ASGITransport, AsyncClient
+from httpx import AsyncClient
 
 from short_timer import crypto
-from short_timer.app import app
-from short_timer.auth import DEFAULT_OWNER_ID
 from short_timer.config import get_settings
 from short_timer.crypto import decrypt, generate_key
-from short_timer.db import get_users_collection, get_workouts_collection
-from short_timer.models import GymProvider, Workout, WorkoutMode
-from short_timer.users import ensure_default_user, get_user
+from short_timer.db import get_users_collection
+from short_timer.models import GymProvider, User
+from short_timer.users import get_user
 
 
 @pytest.fixture(autouse=True)
@@ -22,63 +20,7 @@ def _secrets_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     crypto._cipher.cache_clear()
 
 
-@pytest.fixture
-async def client():
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
-
-
-@pytest.fixture
-async def authed_client(client: AsyncClient) -> AsyncClient:
-    response = await client.post("/api/auth/login", json={"passcode": "test-passcode"})
-    assert response.status_code == 204
-    return client
-
-
 # Session mechanics moved to the database; they're covered in test_auth.py.
-
-
-# --- The seeded default user -------------------------------------------------
-
-
-async def test_default_user_id_matches_backfilled_owner_id() -> None:
-    """Workouts saved before accounts existed must keep belonging to someone."""
-    await ensure_default_user()
-    user = await get_user(DEFAULT_OWNER_ID)
-    assert user is not None
-    assert user.id == DEFAULT_OWNER_ID
-
-
-async def test_seeding_is_idempotent() -> None:
-    assert await ensure_default_user() is True
-    assert await ensure_default_user() is False
-    assert await get_users_collection().count_documents({}) == 1
-
-
-async def test_reseeding_does_not_clobber_existing_config(authed_client: AsyncClient) -> None:
-    await authed_client.put(
-        "/api/me/config", json={"gyms": {"wodify_member": {"credential": "wb-key-abcd1234"}}}
-    )
-    await ensure_default_user()
-    user = await get_user(DEFAULT_OWNER_ID)
-    assert user is not None
-    connection = user.config.connection(GymProvider.WODIFY_MEMBER)
-    assert connection is not None and connection.credential is not None
-
-
-async def test_existing_workouts_survive_the_session_change(authed_client: AsyncClient) -> None:
-    """The whole point of seeding with id == "default"."""
-    await get_workouts_collection().insert_one(
-        {
-            **Workout(name="Legacy", mode=WorkoutMode.FOR_TIME).model_dump(mode="json"),
-            "_id": "legacy-1",
-            "owner_id": DEFAULT_OWNER_ID,
-        }
-    )
-    listed = await authed_client.get("/api/workouts")
-    assert listed.status_code == 200
-    assert any(w["name"] == "Legacy" for w in listed.json()["items"])
 
 
 # --- /api/me -----------------------------------------------------------------
@@ -98,11 +40,11 @@ def _connection(config: dict, provider: str) -> dict | None:
     return next((gym for gym in config["gyms"] if gym["provider"] == provider), None)
 
 
-async def test_me_returns_empty_config_initially(authed_client: AsyncClient) -> None:
+async def test_me_returns_empty_config_initially(authed_client: AsyncClient, account: User) -> None:
     response = await authed_client.get("/api/me")
     assert response.status_code == 200
     body = response.json()
-    assert body["id"] == DEFAULT_OWNER_ID
+    assert body["id"] == account.id
     assert body["secrets_available"] is True
     # No connections at all, rather than a set of blank ones.
     assert body["config"]["gyms"] == []
@@ -139,17 +81,17 @@ async def test_credential_is_never_returned_in_full(authed_client: AsyncClient) 
     assert secret not in response.text
 
 
-async def test_credential_is_encrypted_at_rest(authed_client: AsyncClient) -> None:
+async def test_credential_is_encrypted_at_rest(authed_client: AsyncClient, account: User) -> None:
     secret = "wodify-secret-key-9876"
     await authed_client.put(
         "/api/me/config", json={"gyms": {"wodify_owner": {"credential": secret}}}
     )
 
-    raw = await get_users_collection().find_one({"_id": DEFAULT_OWNER_ID})
+    raw = await get_users_collection().find_one({"_id": account.id})
     assert raw is not None
     assert secret not in str(raw["config"])
     # …and the server can still read it back.
-    user = await get_user(DEFAULT_OWNER_ID)
+    user = await get_user(account.id)
     assert user is not None
     connection = user.config.connection(GymProvider.WODIFY_OWNER)
     assert connection is not None and connection.credential is not None
