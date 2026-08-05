@@ -30,9 +30,9 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 import httpx
-from pydantic import BaseModel
 
 from short_timer.html_text import extract_text
+from short_timer.models import GymProvider, GymWod
 
 logger = logging.getLogger(__name__)
 
@@ -46,21 +46,6 @@ _REQUEST_TIMEOUT = 20.0
 #: workout. Real entries comfortably clear this; a "please sign in" page
 #: reduces to almost nothing once chrome is stripped.
 _MIN_TEXT_LENGTH = 20
-
-
-class GymWod(BaseModel):
-    """One day's workout from a gym's Wodify account.
-
-    Mirrors `crossfit.Wod` rather than reusing it: the two intakes share a
-    shape today but not a lifecycle — crossfit.com has rest days and a public
-    permalink per day, a gym has neither — and coupling them would mean every
-    change to one route rippling into the other.
-    """
-
-    date: date
-    title: str
-    text: str
-    url: str
 
 
 def _first_str(payload: dict[str, Any], *names: str) -> str:
@@ -146,7 +131,13 @@ async def fetch_owner_wod(
         return None
 
     title = _first_str(wod, "Title", "Name", "ProgramName") or _default_title(day)
-    return GymWod(date=day, title=title, text=text, url=_whiteboard_link(day, program=program))
+    return GymWod(
+        date=day,
+        title=title,
+        text=text,
+        url=_whiteboard_link(day, program=program),
+        provider=GymProvider.WODIFY_OWNER,
+    )
 
 
 def _whiteboard_link(day: date, *, program: str = "") -> str:
@@ -199,7 +190,11 @@ async def fetch_member_wod(
         return None
 
     return GymWod(
-        date=day, title=_default_title(day), text=text, url=_whiteboard_link(day, program=program)
+        date=day,
+        title=_default_title(day),
+        text=text,
+        url=_whiteboard_link(day, program=program),
+        provider=GymProvider.WODIFY_MEMBER,
     )
 
 

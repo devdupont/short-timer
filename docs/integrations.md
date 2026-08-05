@@ -28,14 +28,24 @@ side feature, and several of the biggest don't expose it at all.
 The strongest remaining candidate, and structurally the same problem
 `wodify.py` already solved — two routes, one per role:
 
-- **Gym-member route.** A per-affiliate public feed, no authentication:
+- **Gym-member route — documented, but not currently reproducible.** The KB
+  articles describe a per-affiliate public feed with no authentication:
   `https://app.sugarwod.com/public/api/v1/affiliates/{GYM_ID}/workouts/days/{N}/html`
-  with a `?tracks=["workout-of-the-day"]` filter, plus an identical `/rss`
-  variant. `www.sugarwod.com` 301s to `app.`. Probing it with a bogus gym id
-  returns **403, not 404**, so the route is live and gated on a real id —
-  confirm the response shape against a real gym before trusting the parser.
-  The gym opts in by publishing; the id is what an owner pastes into their
-  own website's embed, so a member can reasonably be given it.
+  plus an `/rss` variant, filtered by `?tracks=["workout-of-the-day"]`.
+  `www.sugarwod.com` 301s to `app.`.
+
+  **Probing it does not confirm that shape.** Every format segment tried
+  (`html`, `rss`, `json`, `xml`, `text`, `ical`, `csv`) returns the body
+  `Invalid format.` regardless of the gym id — including ids shaped as slugs,
+  integers, UUIDs and 24-char hex, which rules out the id being what's
+  rejected. Dropping the format segment returns a generic SugarWOD HTML shell.
+  So the route exists and answers, but the documented path or its parameters
+  are stale, and the current shape can't be recovered without a real gym
+  account or the KB article (which fails TLS negotiation from here).
+
+  Treat this route as **blocked on access, not on effort** — the same position
+  the Wodify member route was in. One gym owner with a SugarWOD login settles
+  it in a minute.
 - **Gym-owner route.** `https://api.sugarwod.com/v2`, key from
   `/gyms/settings/developer-keys`, sent as `Authorization: <key>` (a
   `?apiKey=` query form exists — don't use it, it lands in logs).
@@ -50,10 +60,24 @@ same credential-storage path (`SECRETS_KEYS`), same cache shape as
 the JSON envelope comes from documentation, not observation — applies here
 too, so keep `_first_str`-style tolerance.
 
-There's also a practical reason to prefer it over Wodify as the *first*
-integration to see real traffic: the public feed needs no credential at all,
-so it can be tested against any gym that publishes, rather than waiting on one
-gym's admin to mint a key.
+**Build the owner route first.** It's the one whose shape is documented well
+enough to write against, and it's the route the paying customer uses anyway
+(see `docs/pricing.md` — the gym is the buyer). The member route drops into the
+same provider slot once someone confirms its URL.
+
+> **Shipped**, as `src/short_timer/sugarwod.py` / `GymProvider.SUGARWOD_OWNER`.
+>
+> **Partly verified against the live API.** `https://api.sugarwod.com/v2/workouts`
+> answers, and it distinguishes *no* key (`{"errors": {"message": "No API Key
+> found in request.", "code": 999999}}`) from an *unrecognised* one
+> (`"Invalid API Key."`) — which confirms the endpoint, and confirms the server
+> reads a bare `Authorization: <key>` header. What can't be checked without a
+> real key is the response body: the attribute names come from documentation,
+> so `_first` and `_as_date` tolerate several spellings rather than hard-failing.
+>
+> **A rejected key comes back as HTTP 400, not 401.** Worth knowing before
+> writing any other client against this API. The member route is a `TODO` in
+> that module's docstring, not a design question.
 
 ## Rejected, with reasons
 

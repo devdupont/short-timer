@@ -20,17 +20,15 @@ from short_timer.auth import DEFAULT_OWNER_ID
 from short_timer.crypto import SecretBox, SecretStatus, encrypt, is_configured
 from short_timer.db import get_users_collection
 from short_timer.models import (
+    GymConnection,
+    GymConnectionUpdate,
+    GymConnectionView,
+    GymProvider,
     MeResponse,
     User,
     UserConfig,
     UserConfigUpdate,
     UserConfigView,
-    WodifyMemberConfig,
-    WodifyMemberConfigUpdate,
-    WodifyMemberConfigView,
-    WodifyOwnerConfig,
-    WodifyOwnerConfigUpdate,
-    WodifyOwnerConfigView,
     normalize_feeds,
 )
 
@@ -82,21 +80,20 @@ def _status(box: SecretBox | None) -> SecretStatus:
     return SecretStatus(is_set=True, masked=box.masked())
 
 
+def _connection_view(connection: GymConnection) -> GymConnectionView:
+    return GymConnectionView(
+        provider=connection.provider,
+        credential=_status(connection.credential),
+        location=connection.location,
+        program=connection.program,
+        enabled=connection.enabled,
+    )
+
+
 def to_view(config: UserConfig) -> UserConfigView:
     """Config with every credential reduced to set/not-set plus a mask."""
     return UserConfigView(
-        wodify_owner=WodifyOwnerConfigView(
-            api_key=_status(config.wodify_owner.api_key),
-            location=config.wodify_owner.location,
-            program=config.wodify_owner.program,
-            enabled=config.wodify_owner.enabled,
-        ),
-        wodify_member=WodifyMemberConfigView(
-            whiteboard_key=_status(config.wodify_member.whiteboard_key),
-            location=config.wodify_member.location,
-            program=config.wodify_member.program,
-            enabled=config.wodify_member.enabled,
-        ),
+        gyms=[_connection_view(connection) for connection in config.gyms],
         # Normalized on the way out so a record written before a feed kind
         # existed still reports a complete list.
         feeds=normalize_feeds(config.feeds),
@@ -136,33 +133,37 @@ def _apply_text(current: str | None, submitted: str | None) -> str | None:
     return submitted.strip() or None
 
 
-def _merged_owner(current: WodifyOwnerConfig, update: WodifyOwnerConfigUpdate) -> WodifyOwnerConfig:
-    return WodifyOwnerConfig(
-        api_key=_apply_secret(current.api_key, update.api_key),
+def _apply_connection(
+    config: UserConfig, provider: GymProvider, update: GymConnectionUpdate
+) -> None:
+    """Merge one provider's change into `config.gyms`, in place.
+
+    A connection is created on first write and *removed* once it holds nothing
+    worth keeping — clearing the credential on a connection the user has also
+    switched off is how you disconnect a gym, and leaving an empty husk behind
+    would make the settings screen claim a connection that can never fetch.
+    """
+    current = config.connection(provider) or GymConnection(provider=provider)
+    merged = GymConnection(
+        provider=provider,
+        credential=_apply_secret(current.credential, update.credential),
         location=_apply_text(current.location, update.location),
         program=_apply_text(current.program, update.program),
         enabled=current.enabled if update.enabled is None else update.enabled,
     )
-
-
-def _merged_member(
-    current: WodifyMemberConfig, update: WodifyMemberConfigUpdate
-) -> WodifyMemberConfig:
-    return WodifyMemberConfig(
-        whiteboard_key=_apply_secret(current.whiteboard_key, update.whiteboard_key),
-        location=_apply_text(current.location, update.location),
-        program=_apply_text(current.program, update.program),
-        enabled=current.enabled if update.enabled is None else update.enabled,
-    )
+    config.gyms = [c for c in config.gyms if c.provider != provider]
+    if merged.credential is not None or merged.location or merged.program:
+        config.gyms.append(merged)
 
 
 async def update_config(user: User, update: UserConfigUpdate) -> User:
     """Merge a partial config change into the user's stored config."""
     config = user.config.model_copy(deep=True)
-    if update.wodify_owner is not None:
-        config.wodify_owner = _merged_owner(config.wodify_owner, update.wodify_owner)
-    if update.wodify_member is not None:
-        config.wodify_member = _merged_member(config.wodify_member, update.wodify_member)
+
+    if update.gyms is not None:
+        for provider, connection_update in update.gyms.items():
+            _apply_connection(config, provider, connection_update)
+
     if update.feeds is not None:
         config.feeds = normalize_feeds(update.feeds)
 

@@ -22,8 +22,15 @@ export interface FeedEntry {
   date: string;
   title: string;
   text: string;
+  /** Empty when the source has no page we can link to — the card drops the link. */
   url: string;
   saved_workout_id?: string | null;
+  /**
+   * Overrides the spec's `linkLabel` for this entry. The gym feed sets it,
+   * because "your gym" is whichever platform you connected and only the server
+   * knows which — see the provider registry.
+   */
+  link_label?: string;
 }
 
 export interface FeedSpec {
@@ -133,8 +140,10 @@ export const GYM_SPEC: FeedSpec = {
   kind: "gym",
   heading: "Your gym",
   blurb: "Programming from the gym you connected in Settings.",
-  linkLabel: "View on Wodify ↗",
-  // Wodify returns the workout as the gym wrote it — no wrapper prose to strip.
+  // Only a fallback: each entry carries its own label naming the platform it
+  // actually came from.
+  linkLabel: "View at the source ↗",
+  // A gym platform returns the workout as the gym wrote it — no prose to strip.
   body: (text) => truncate(text.replace(/\r\n/g, "\n").trim()),
   // A gym that isn't running a class simply publishes nothing that day, so
   // there's no rest-day text to recognise.

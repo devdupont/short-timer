@@ -33,19 +33,22 @@ const EMPTY: FeedState = { entries: [], configured: true, error: null };
  * connected" and "gym connected but switched off". The user's own config
  * distinguishes them, and they need different actions, so the copy is decided
  * here rather than server-side.
+ *
+ * Deliberately platform-agnostic: which platform the user connected is a
+ * Settings concern, and naming one here would go stale the next time a
+ * provider is added.
  */
 function gymEmptyReason(me: Me, state: FeedState): string {
-  const { wodify_owner: owner, wodify_member: member } = me.config;
-  const hasCredential = owner.api_key.is_set || member.whiteboard_key.is_set;
+  const stored = me.config.gyms.filter((gym) => gym.credential.is_set);
 
-  if (!hasCredential) {
-    return "No gym connected yet. Add your gym's whiteboard key or API key in Settings and its programming shows up here.";
+  if (stored.length === 0) {
+    return "No gym connected yet. Add your gym's key in Settings and its programming shows up here.";
   }
-  if (!owner.enabled && !member.enabled) {
+  if (!stored.some((gym) => gym.enabled)) {
     return "Your gym connection is saved but switched off. Turn it back on in Settings.";
   }
   if (!state.configured) {
-    return "Your gym connection is incomplete — check that the location and program in Settings match your gym's Wodify setup exactly.";
+    return "Your gym connection is incomplete — Settings will show which fields it still needs.";
   }
   // Connected, switched on, and simply quiet — the ordinary empty case.
   return FEED_SPECS.gym.emptyMessage;

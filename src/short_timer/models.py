@@ -11,7 +11,7 @@ understand one schema.
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, Field, model_validator
@@ -222,40 +222,87 @@ class LoginRequest(BaseModel):
 # belongs to a user rather than to the environment.
 
 
-class WodifyOwnerConfig(BaseModel):
-    """Wodify Program API access, for someone who runs the gym.
+# --- Gym providers -----------------------------------------------------------
+# A gym's programming lives on whichever platform the gym pays for, reached by
+# a route that differs by whether you run the gym or attend it. Those two axes
+# multiply, so each *combination* is a provider rather than trying to model
+# platform and role separately — "the SugarWOD owner route" is the unit that
+# has a URL, a credential and a response shape.
 
-    The API key is minted by a gym admin in Wodify and grants access to that
-    gym's programming, so it's a credential and never leaves the server in the
-    clear — see `UserConfigView` for what a client actually receives.
+
+class GymProvider(StrEnum):
+    """One way of reaching one gym platform.
+
+    Closed on purpose, like `FeedKind`: these are the routes the server knows
+    how to fetch, not free-form user input. `gym_providers.py` holds the
+    human-facing metadata and the fetch dispatch for each member here.
     """
 
-    api_key: SecretBox | None = None
+    WODIFY_MEMBER = "wodify_member"
+    WODIFY_OWNER = "wodify_owner"
+    SUGARWOD_OWNER = "sugarwod_owner"
+
+
+#: Which provider is tried first when a user has configured more than one.
+#: Member routes outrank owner routes: someone who is both an admin and an
+#: athlete sees the same gym either way, and a public whiteboard costs no API
+#: quota. Beyond that it's the order providers shipped in, which is arbitrary
+#: but stable — and a user who wants a different answer switches the other
+#: connection off.
+PROVIDER_PRIORITY: tuple[GymProvider, ...] = (
+    GymProvider.WODIFY_MEMBER,
+    GymProvider.WODIFY_OWNER,
+    GymProvider.SUGARWOD_OWNER,
+)
+
+
+class GymConnection(BaseModel):
+    """One stored gym credential, plus the settings that qualify it.
+
+    `location` and `program` are deliberately generic rather than named per
+    platform: Wodify calls them location and program, SugarWOD calls the second
+    one a track, and inventing a field per platform would put the registry's
+    job (labelling) into the storage schema. What each one *means* is declared
+    in `gym_providers.py` and rendered from there.
+    """
+
+    provider: GymProvider
+    credential: SecretBox | None = None
     location: str | None = Field(default=None, max_length=200)
     program: str | None = Field(default=None, max_length=200)
     enabled: bool = False
 
     def is_usable(self) -> bool:
-        """Whether this is complete enough to fetch with."""
-        return bool(self.enabled and self.api_key and self.location and self.program)
+        """Whether this is complete enough to fetch with.
+
+        Only the credential is required here. Whether a provider *also* needs
+        a location or program is a property of that provider, so the check
+        lives with it — see `GymProviderSpec.is_usable`.
+        """
+        return bool(self.enabled and self.credential)
 
 
-class WodifyMemberConfig(BaseModel):
-    """Wodify public whiteboard access, for a member of the gym.
+class GymWod(BaseModel):
+    """One day's workout from a gym, whichever platform it came from.
 
-    The whiteboard key only works if the gym enabled public publishing, and it
-    appears in a URL the gym hands out — so it's far less sensitive than an API
-    key. It's still encrypted: it identifies the user's gym, and treating every
-    third-party credential the same way is one less exception to reason about.
+    Mirrors `crossfit.Wod` rather than reusing it: the two intakes share a
+    shape today but not a lifecycle — crossfit.com has rest days and a public
+    permalink per day, a gym has neither — and coupling them would mean every
+    change to one route rippling into the other.
+
+    Lives here rather than beside a client because every provider produces
+    one; `provider` records which did, so a card can say "View on SugarWOD"
+    without the frontend having to infer it from the URL.
     """
 
-    whiteboard_key: SecretBox | None = None
-    location: str | None = Field(default=None, max_length=200)
-    program: str | None = Field(default=None, max_length=200)
-    enabled: bool = False
-
-    def is_usable(self) -> bool:
-        return bool(self.enabled and self.whiteboard_key)
+    date: date
+    title: str
+    text: str
+    #: A "see it at the source" pointer, or empty when the platform has no
+    #: page we can link a member to without leaking their credential. The UI
+    #: drops the link rather than rendering a dead one.
+    url: str = ""
+    provider: GymProvider
 
 
 class FeedKind(StrEnum):
@@ -292,7 +339,7 @@ DEFAULT_ENABLED_FEEDS: frozenset[FeedKind] = frozenset({FeedKind.GYM, FeedKind.C
 class FeedPref(BaseModel):
     """Whether a feed appears on the home page.
 
-    Distinct from the `enabled` flag on a Wodify config, which selects *which
+    Distinct from the `enabled` flag on a `GymConnection`, which selects *which
     credential route* to fetch a gym with. This one is purely presentational:
     it decides what the home page renders, and position in the list is the
     display order.
@@ -335,9 +382,11 @@ def normalize_feeds(feeds: list[FeedPref]) -> list[FeedPref]:
 class UserConfig(BaseModel):
     """Everything a user configures about their own account."""
 
-    wodify_owner: WodifyOwnerConfig = Field(default_factory=WodifyOwnerConfig)
-    wodify_member: WodifyMemberConfig = Field(default_factory=WodifyMemberConfig)
+    gyms: list[GymConnection] = Field(default_factory=list)
     feeds: list[FeedPref] = Field(default_factory=default_feeds)
+
+    def connection(self, provider: GymProvider) -> GymConnection | None:
+        return next((c for c in self.gyms if c.provider == provider), None)
 
 
 class User(BaseModel):
@@ -356,15 +405,11 @@ class User(BaseModel):
 # that, rather than remembering to strip fields at each call site.
 
 
-class WodifyOwnerConfigView(BaseModel):
-    api_key: SecretStatus = Field(default_factory=SecretStatus)
-    location: str | None = None
-    program: str | None = None
-    enabled: bool = False
+class GymConnectionView(BaseModel):
+    """One stored connection, with its credential reduced to set/not-set."""
 
-
-class WodifyMemberConfigView(BaseModel):
-    whiteboard_key: SecretStatus = Field(default_factory=SecretStatus)
+    provider: GymProvider
+    credential: SecretStatus = Field(default_factory=SecretStatus)
     location: str | None = None
     program: str | None = None
     enabled: bool = False
@@ -377,8 +422,7 @@ class UserConfigView(BaseModel):
     getting a parallel view model that would only ever copy fields across.
     """
 
-    wodify_owner: WodifyOwnerConfigView = Field(default_factory=WodifyOwnerConfigView)
-    wodify_member: WodifyMemberConfigView = Field(default_factory=WodifyMemberConfigView)
+    gyms: list[GymConnectionView] = Field(default_factory=list)
     feeds: list[FeedPref] = Field(default_factory=default_feeds)
 
 
@@ -391,30 +435,26 @@ class MeResponse(BaseModel):
     secrets_available: bool = True
 
 
-class WodifyOwnerConfigUpdate(BaseModel):
-    """A requested change. Every field is optional: omitted means "leave it".
+class GymConnectionUpdate(BaseModel):
+    """A requested change to one gym connection.
 
-    `api_key` distinguishes three cases — absent leaves the stored key alone
-    (so the UI can save other fields without re-entering it), empty string
-    clears it, and a value replaces it.
+    `credential` is three-way: absent leaves the stored value alone (so the UI
+    can fix a typo'd location without re-entering the key), an empty string
+    clears it, and anything else replaces it.
     """
 
-    api_key: str | None = Field(default=None, max_length=500)
-    location: str | None = Field(default=None, max_length=200)
-    program: str | None = Field(default=None, max_length=200)
-    enabled: bool | None = None
-
-
-class WodifyMemberConfigUpdate(BaseModel):
-    whiteboard_key: str | None = Field(default=None, max_length=500)
+    credential: str | None = Field(default=None, max_length=500)
     location: str | None = Field(default=None, max_length=200)
     program: str | None = Field(default=None, max_length=200)
     enabled: bool | None = None
 
 
 class UserConfigUpdate(BaseModel):
-    wodify_owner: WodifyOwnerConfigUpdate | None = None
-    wodify_member: WodifyMemberConfigUpdate | None = None
+    #: Keyed by provider rather than a list, because a list would face the
+    #: same unmergeable-position problem `feeds` has — and unlike feeds, order
+    #: here isn't user-facing, so there's nothing to be gained by paying it.
+    #: Only the providers named are touched; the rest are left alone.
+    gyms: dict[GymProvider, GymConnectionUpdate] | None = None
     #: Replaced wholesale rather than merged, because position *is* the display
     #: order — there's no unambiguous way to merge one entry into an ordered
     #: list. Absent still means "leave it alone". Bounded by the number of

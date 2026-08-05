@@ -34,13 +34,18 @@ SOURCE_CROSSFIT = "crossfit"
 SOURCE_CONCEPT2 = "concept2"
 SOURCE_HYBRID = "hybrid"
 SOURCE_USER = "user"
-#: A gym's own programming, pulled from Wodify. Deliberately *not* permanent
-#: like crossfit.com: it belongs to one gym rather than to a public commons,
-#: and only that gym's members ever hold the same text, so the sharing win is
-#: bounded by a single gym rather than the whole user base. Ageing it out costs
-#: at most one re-parse of a workout nobody has looked at in a year, and means
-#: a gym's programming doesn't linger indefinitely after someone leaves.
-SOURCE_WODIFY = "wodify"
+#: A gym's own programming, from whichever platform it was pulled off.
+#: Deliberately *not* permanent like crossfit.com: it belongs to one gym rather
+#: than to a public commons, and only that gym's members ever hold the same
+#: text, so the sharing win is bounded by a single gym rather than the whole
+#: user base. Ageing it out costs at most one re-parse of a workout nobody has
+#: looked at in a year, and means a gym's programming doesn't linger
+#: indefinitely after someone leaves.
+#:
+#: Entries written before there was more than one gym platform carry the older
+#: value "wodify". They need no migration: retention keys on *not* being in
+#: `PERMANENT_SOURCES`, so both labels age out under exactly the same rule.
+SOURCE_GYM = "gym"
 
 #: Sources that publish to everyone, where the same text keeps coming back and
 #: nobody's content is being held. Entries from these are kept indefinitely;

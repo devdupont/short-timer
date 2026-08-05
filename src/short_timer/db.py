@@ -5,6 +5,7 @@ support (`pymongo.AsyncMongoClient`, 4.9+); this talks to Mongo directly
 through that instead.
 """
 
+import logging
 from functools import lru_cache
 from typing import Any
 
@@ -15,6 +16,8 @@ from pymongo.asynchronous.database import AsyncDatabase
 from short_timer.auth import DEFAULT_OWNER_ID
 from short_timer.config import get_settings
 from short_timer.dedup import source_hash
+
+logger = logging.getLogger(__name__)
 
 
 @lru_cache
@@ -55,9 +58,15 @@ def get_parse_cache_collection() -> AsyncCollection[dict[str, Any]]:
     return get_database()["parse_cache"]
 
 
-def get_wodify_cache_collection() -> AsyncCollection[dict[str, Any]]:
-    """Cached Wodify workouts, keyed by gym fingerprint + date (see wodify_cache)."""
-    return get_database()["wodify_cache"]
+def get_gym_cache_collection() -> AsyncCollection[dict[str, Any]]:
+    """Cached gym workouts, keyed by gym fingerprint + date (see gym_cache).
+
+    Renamed from `wodify_cache` when gyms stopped being Wodify-only. Nothing
+    migrates the old collection: it holds only derived data with a 12-hour
+    refresh interval, so the first request for a gym repopulates it and the
+    stale collection can simply be dropped.
+    """
+    return get_database()["gym_cache"]
 
 
 def get_users_collection() -> AsyncCollection[dict[str, Any]]:
@@ -82,7 +91,7 @@ async def ensure_indexes() -> None:
     await get_wod_cache_collection().create_index("date")
     await get_concept2_cache_collection().create_index("date")
     # The gym feed always reads one gym's recent days, so index the pair.
-    await get_wodify_cache_collection().create_index([("gym", 1), ("date", -1)])
+    await get_gym_cache_collection().create_index([("gym", 1), ("date", -1)])
     # parse_cache is keyed by source hash as its _id, so lookups need no index.
     # The retention sweep filters on provenance and age, though.
     await get_parse_cache_collection().create_index([("source", 1), ("created_at", 1)])
