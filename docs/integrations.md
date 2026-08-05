@@ -155,6 +155,10 @@ Reading Hevy *routines* as a programming source is possible but much less
 interesting: routines are strength templates, not a dated daily workout, and
 the user authored them in the first place.
 
+**Designed, not built** — see `docs/exports.md`, which has the verified API
+shape (it publishes an OpenAPI spec) and the finding that matters: the blocker
+is not the client, it's that this app has no *result* to send.
+
 ## The highest-leverage build: a generic feed adapter
 
 Three separate findings point the same way. SugarWOD publishes RSS. Gyms

@@ -9,10 +9,16 @@ from short_timer.benchmarks import benchmark_workouts
 from short_timer.db import get_workouts_collection
 from short_timer.dedup import source_hash
 from short_timer.llm import WorkoutParseError, parse_workout_text
-from short_timer.metrics import ParseOutcome, record_parse, record_workout_started
+from short_timer.metrics import (
+    ParseOutcome,
+    record_parse,
+    record_workout_completed,
+    record_workout_started,
+)
 from short_timer.models import (
     SeedResponse,
     Workout,
+    WorkoutCompletedRequest,
     WorkoutCreateRequest,
     WorkoutMode,
     WorkoutPage,
@@ -300,6 +306,37 @@ async def mark_started(workout_id: str, owner_id: str = Depends(current_owner)) 
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workout not found")
     await record_workout_started(
         owner_id=owner_id, workout_id=workout_id, mode=str(doc.get("mode") or "")
+    )
+
+
+@router.post("/{workout_id}/completed", status_code=status.HTTP_204_NO_CONTENT)
+async def mark_completed(
+    workout_id: str,
+    body: WorkoutCompletedRequest,
+    owner_id: str = Depends(current_owner),
+) -> None:
+    """Record that the clock stopped, and how long it ran for.
+
+    The counterpart to `/started`. On its own a start count can't distinguish a
+    workout people finish from one they abandon halfway, which is the more
+    interesting number — and it's the difference between programming that fits
+    and programming that doesn't.
+
+    This is *not* a result. It says the clock ran, not what was actually
+    lifted or how many rounds landed; that needs a model this app doesn't have
+    (see `docs/exports.md`). When one exists, this is the moment an export to
+    the athlete's own training log fires.
+    """
+    doc = await get_workouts_collection().find_one(
+        {"_id": workout_id, "owner_id": owner_id}, {"mode": 1}
+    )
+    if doc is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workout not found")
+    await record_workout_completed(
+        owner_id=owner_id,
+        workout_id=workout_id,
+        mode=str(doc.get("mode") or ""),
+        elapsed_seconds=body.elapsed_seconds,
     )
 
 

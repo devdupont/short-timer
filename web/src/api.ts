@@ -178,6 +178,14 @@ export function markWorkoutStarted(id: string): Promise<void> {
   return request(`/api/workouts/${id}/started`, { method: "POST" });
 }
 
+/** Tell the server the clock stopped, and how long it ran. Same fire-and-forget contract as `markWorkoutStarted`. */
+export function markWorkoutCompleted(id: string, elapsedSeconds: number): Promise<void> {
+  return request(`/api/workouts/${id}/completed`, {
+    method: "POST",
+    body: JSON.stringify({ elapsed_seconds: elapsedSeconds }),
+  });
+}
+
 export function deleteWorkout(id: string): Promise<void> {
   return request(`/api/workouts/${id}`, { method: "DELETE" });
 }

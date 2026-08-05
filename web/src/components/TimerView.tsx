@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { markWorkoutStarted } from "../api";
+import { useEffect, useRef, useState } from "react";
+import { markWorkoutCompleted, markWorkoutStarted } from "../api";
 import { useTimerEngine } from "../hooks/useTimerEngine";
 import { useTimerAudio } from "../hooks/useTimerAudio";
 import { useWakeLock } from "../hooks/useWakeLock";
@@ -95,6 +95,28 @@ export function TimerView({ workout }: { workout: Workout }) {
 
 function ClockView({ workout }: { workout: Workout }) {
   const { state, controls } = useTimerEngine(workout);
+
+  // The engine reaches "finished" three ways — the Finish button, an interval
+  // plan running out, and an AMRAP hitting its cap — so this watches the state
+  // rather than hanging off any one of them.
+  //
+  // The guard is cleared on the way *out* of "finished" rather than keyed on
+  // the workout id. Keying on the id looks equivalent and isn't: it makes the
+  // flag stick for the lifetime of the component, so a second run of the same
+  // workout — reset and try again, or simply doing Helen twice — records its
+  // start and silently drops its finish.
+  const reportedRef = useRef(false);
+  useEffect(() => {
+    if (state.status !== "finished") {
+      reportedRef.current = false;
+      return;
+    }
+    if (reportedRef.current || !workout.id) return;
+    reportedRef.current = true;
+    // Telemetry: unawaited, failures ignored. Nothing about finishing a
+    // workout should depend on the network.
+    void markWorkoutCompleted(workout.id, state.elapsedSeconds).catch(() => {});
+  }, [state.status, state.elapsedSeconds, workout.id]);
   // Audio cues on the wall display — remembered per browser so a muted gym
   // stays muted between sessions.
   const [muted, setMuted] = useState(() => {

@@ -30,6 +30,7 @@ parse the user already paid for is a far worse bug than a missing data point.
 | `parse` | Are the caches earning their keep? | The demand side. `library_hit` / `pool_hit` / `model_call` / `failed`. |
 | `feed_refresh` | Is each source actually working? | `ok` is the signal. `rows` counts days written *on that pass*, so it's 0 for a refresh that was skipped as still fresh — don't read a zero as a failure. |
 | `workout_started` | Is anyone training, or just browsing? | Its own call from the timer, not inferred from a read — loading a workout and running it are very different signals. |
+| `workout_completed` | Do people finish what they start? | Paired with the above it gives a completion rate — programming that fits versus programming people abandon. Carries elapsed clock time, **not** a result: reps, load and score need a model that doesn't exist (`docs/exports.md`). |
 | `login` | How many people are active? | The basis of any MAU number. |
 
 Deliberately **not** recorded: workout text, credentials, or anything derived

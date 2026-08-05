@@ -190,6 +190,18 @@ class WorkoutCreateRequest(BaseModel):
     workout: Workout
 
 
+class WorkoutCompletedRequest(BaseModel):
+    """How long the clock ran, reported when a session ends.
+
+    Bounded because it comes from a browser and is only ever read as a
+    statistic: a clock left running overnight would drag an average around
+    with no way to tell it from a real session. Twelve hours is well past any
+    workout and short of anything that could be a stuck tab.
+    """
+
+    elapsed_seconds: float = Field(ge=0, le=12 * 60 * 60)
+
+
 class WorkoutPage(BaseModel):
     """One page of a library listing.
 
