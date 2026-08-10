@@ -12,8 +12,6 @@ indexed upsert per request; these limits exist to bound abuse and cost, not
 to shape traffic precisely.
 """
 
-from __future__ import annotations
-
 import logging
 import math
 import time
@@ -128,6 +126,7 @@ async def enforce(rate_limit: RateLimit, subject: str) -> None:
 
 
 def _too_many(rate_limit: RateLimit, subject: str, resets_at: float, now: float) -> None:
+    """Log and raise the 429 shared by `peek` and `enforce`."""
     retry_after = max(1, int(resets_at - now))
     logger.warning(
         "Rate limit hit: scope=%s subject=%s limit=%d",
@@ -148,18 +147,22 @@ def _expiry(resets_at: float) -> datetime:
 
 
 def login_limit() -> RateLimit:
+    """Failed sign-in attempts allowed per subject in 15 minutes."""
     return RateLimit("login", get_settings().login_attempts_per_15_min, 15 * 60)
 
 
 def llm_subject_limit() -> RateLimit:
+    """Model calls allowed per subject per hour."""
     return RateLimit("llm", get_settings().llm_calls_per_hour_per_subject, 3600)
 
 
 def llm_global_limit() -> RateLimit:
+    """Model calls allowed across the whole deployment per hour — the spend backstop."""
     return RateLimit("llm-global", get_settings().llm_calls_per_hour_global, 3600)
 
 
 def write_limit() -> RateLimit:
+    """Mutating requests allowed per subject per minute."""
     return RateLimit("write", get_settings().writes_per_minute_per_subject, 60)
 
 

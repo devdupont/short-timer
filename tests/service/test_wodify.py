@@ -53,6 +53,7 @@ DAY = date(2026, 7, 20)
 
 @pytest.fixture
 async def client() -> AsyncIterator[httpx.AsyncClient]:
+    """A bare httpx client for calling the fetch functions directly, network mocked by respx."""
     async with httpx.AsyncClient(follow_redirects=True) as ac:
         yield ac
 
@@ -61,6 +62,7 @@ async def client() -> AsyncIterator[httpx.AsyncClient]:
 
 
 def test_extract_text_drops_chrome_and_keeps_workout() -> None:
+    """Nav, footer, script, and style are stripped; the workout text survives."""
     text = extract_text(WHITEBOARD_HTML)
     assert "Thrusters 95/65 lb" in text
     assert "21-15-9" in text
@@ -72,6 +74,7 @@ def test_extract_text_drops_chrome_and_keeps_workout() -> None:
 
 
 def test_extract_text_collapses_blank_lines() -> None:
+    """Repeated `<br>` tags don't produce runs of blank lines in the extracted text."""
     assert "\n\n" not in extract_text("<p>a</p><br><br><p>b</p>")
 
 
@@ -80,6 +83,7 @@ def test_extract_text_collapses_blank_lines() -> None:
 
 @respx.mock
 async def test_member_fetch_returns_workout(client: httpx.AsyncClient) -> None:
+    """A published whiteboard yields a workout whose URL never carries the credential."""
     respx.get(WHITEBOARD).mock(return_value=httpx.Response(200, html=WHITEBOARD_HTML))
     wod = await fetch_member_wod(client, DAY, whiteboard_key="wb-key")
     assert wod is not None
@@ -92,6 +96,7 @@ async def test_member_fetch_returns_workout(client: httpx.AsyncClient) -> None:
 
 @respx.mock
 async def test_member_fetch_sends_expected_params(client: httpx.AsyncClient) -> None:
+    """The request carries the whiteboard key, a US-format date, and the location/program."""
     route = respx.get(WHITEBOARD).mock(return_value=httpx.Response(200, html=WHITEBOARD_HTML))
     await fetch_member_wod(
         client, DAY, whiteboard_key="wb-key", location="Main", program="CrossFit"
@@ -114,12 +119,14 @@ async def test_member_unpublished_day_is_skipped(client: httpx.AsyncClient) -> N
 
 @respx.mock
 async def test_member_http_error_is_skipped(client: httpx.AsyncClient) -> None:
+    """A 500 from the whiteboard is treated as a missing day."""
     respx.get(WHITEBOARD).mock(return_value=httpx.Response(500))
     assert await fetch_member_wod(client, DAY, whiteboard_key="wb-key") is None
 
 
 @respx.mock
 async def test_member_network_failure_is_skipped(client: httpx.AsyncClient) -> None:
+    """A connection failure to the whiteboard is treated as a missing day."""
     respx.get(WHITEBOARD).mock(side_effect=httpx.ConnectError("boom"))
     assert await fetch_member_wod(client, DAY, whiteboard_key="wb-key") is None
 
@@ -142,6 +149,7 @@ async def test_recent_member_wods_skips_bad_days() -> None:
 
 @respx.mock
 async def test_owner_fetch_reads_formatted_wod(client: httpx.AsyncClient) -> None:
+    """The `FormattedWOD` HTML fragment is read and stripped down to plain text."""
     respx.get(PROGRAM_API).mock(
         return_value=httpx.Response(200, json={"APIWod": {"FormattedWOD": FORMATTED_WOD_HTML}})
     )
@@ -153,6 +161,7 @@ async def test_owner_fetch_reads_formatted_wod(client: httpx.AsyncClient) -> Non
 
 @respx.mock
 async def test_owner_fetch_sends_api_key_header(client: httpx.AsyncClient) -> None:
+    """The request carries the API key as `x-api-key`, and the date/location as query params."""
     route = respx.get(PROGRAM_API).mock(
         return_value=httpx.Response(200, json={"APIWod": {"FormattedWOD": FORMATTED_WOD_HTML}})
     )
@@ -180,18 +189,21 @@ async def test_owner_fetch_tolerates_envelope_variations(client: httpx.AsyncClie
 
 @respx.mock
 async def test_owner_rejected_key_is_skipped(client: httpx.AsyncClient) -> None:
+    """A 401 (revoked/wrong key) is treated as a missing day, not raised."""
     respx.get(PROGRAM_API).mock(return_value=httpx.Response(401))
     assert await fetch_owner_wod(client, DAY, api_key="bad", location="L", program="P") is None
 
 
 @respx.mock
 async def test_owner_non_json_response_is_skipped(client: httpx.AsyncClient) -> None:
+    """A 200 response that isn't valid JSON is treated as a missing day."""
     respx.get(PROGRAM_API).mock(return_value=httpx.Response(200, text="<html>nope</html>"))
     assert await fetch_owner_wod(client, DAY, api_key="k", location="L", program="P") is None
 
 
 @respx.mock
 async def test_owner_empty_workout_is_skipped(client: httpx.AsyncClient) -> None:
+    """An envelope with no workout fields inside is treated as a missing day."""
     respx.get(PROGRAM_API).mock(return_value=httpx.Response(200, json={"APIWod": {}}))
     assert await fetch_owner_wod(client, DAY, api_key="k", location="L", program="P") is None
 
@@ -201,6 +213,7 @@ async def test_owner_empty_workout_is_skipped(client: httpx.AsyncClient) -> None
 
 
 def test_different_gyms_never_share_a_cache_key() -> None:
+    """Two different credentials on the same provider fingerprint to different keys."""
     assert gym_fingerprint("gym-a-key", GymProvider.WODIFY_MEMBER) != gym_fingerprint(
         "gym-b-key", GymProvider.WODIFY_MEMBER
     )
@@ -221,5 +234,6 @@ def test_routes_do_not_collide() -> None:
 
 
 def test_fingerprint_does_not_leak_the_credential() -> None:
+    """The fingerprint never contains the credential it was derived from."""
     secret = "super-secret-whiteboard-key"
     assert secret not in gym_fingerprint(secret, GymProvider.WODIFY_MEMBER)

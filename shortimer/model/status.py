@@ -1,4 +1,4 @@
-""""""
+"""Who a user is allowed to be: their global role, and whether they're active."""
 
 from enum import StrEnum
 

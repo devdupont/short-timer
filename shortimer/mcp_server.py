@@ -24,8 +24,6 @@ have been issued to that account, carries scopes, and can be revoked on its
 own.
 """
 
-from __future__ import annotations
-
 import re
 from typing import Any
 
@@ -79,6 +77,7 @@ async def _owner_for(scope: ApiTokenScope) -> str:
 
 
 def _to_document(workout: Workout, owner_id: str) -> dict[str, Any]:
+    """`workout` as a Mongo document, matching `router/workouts.py`'s shape."""
     doc = workout.model_dump(mode="json")
     doc["_id"] = doc.pop("id")
     doc["owner_id"] = owner_id
@@ -86,6 +85,7 @@ def _to_document(workout: Workout, owner_id: str) -> dict[str, Any]:
 
 
 def _from_document(doc: dict[str, Any]) -> dict[str, Any]:
+    """A Mongo document as the JSON shape an MCP tool returns."""
     doc = dict(doc)
     doc["id"] = doc.pop("_id")
     return Workout(**doc).model_dump(mode="json")
@@ -189,6 +189,7 @@ async def get_workout(workout_id: str) -> dict[str, Any] | None:
 
 
 def run() -> None:
+    """Entry point for `hatch run mcp`: serve over stdio."""
     mcp.run()
 
 

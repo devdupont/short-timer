@@ -8,7 +8,7 @@ tested by faking the verification result, which is the only way to exercise
 them without a real authenticator.
 """
 
-from collections.abc import Awaitable, Callable, Generator
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -18,22 +18,18 @@ from conftest import TEST_PASSWORD
 from httpx import AsyncClient
 
 from shortimer.auth import passkeys
-from shortimer.cache.db import get_credentials_collection, get_webauthn_challenges_collection
+from shortimer.cache.db import get_webauthn_challenges_collection
 from shortimer.config import get_settings
+from shortimer.model.passkey import Passkey
 from shortimer.model.user import User
 
 SignInAs = Callable[[AsyncClient, str], Awaitable[str]]
 
 
-@pytest.fixture(autouse=True)
-def _clear_settings_cache() -> Generator[None]:
-    get_settings.cache_clear()
-    yield
-    get_settings.cache_clear()
-
-
 @dataclass
 class FakeRegistration:
+    """Stands in for py_webauthn's `verify_registration_response` result."""
+
     credential_id: bytes = b"credential-one"
     credential_public_key: bytes = b"public-key-bytes"
     sign_count: int = 0
@@ -43,6 +39,8 @@ class FakeRegistration:
 
 @dataclass
 class FakeAuthentication:
+    """Stands in for py_webauthn's `verify_authentication_response` result."""
+
     new_sign_count: int = 1
     credential_backed_up: bool = True
 
@@ -81,6 +79,7 @@ async def _register(
 async def test_a_challenge_is_stored_and_handed_out_by_handle(
     authed_client: AsyncClient,
 ) -> None:
+    """A challenge is stored server-side and referenced by an opaque handle, not the challenge itself."""
     body = (await authed_client.post("/api/me/passkeys/challenge")).json()
     assert body["challenge_handle"]
     # The options go straight to navigator.credentials.create().
@@ -111,6 +110,7 @@ async def test_login_options_name_no_credentials(client: AsyncClient) -> None:
 async def test_a_challenge_cannot_be_spent_twice(
     authed_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Replaying the same challenge handle a second time is refused."""
     monkeypatch.setattr(
         passkeys.webauthn, "verify_registration_response", lambda **_: FakeRegistration()
     )
@@ -172,7 +172,7 @@ async def test_a_challenge_is_bound_to_the_account_that_asked(
         },
     )
     assert response.status_code == 400
-    assert await get_credentials_collection().count_documents({}) == 0
+    assert await Passkey.find_all().count() == 0
 
 
 # --- Registration -------------------------------------------------------------
@@ -181,13 +181,16 @@ async def test_a_challenge_is_bound_to_the_account_that_asked(
 async def test_registering_stores_the_credential(
     authed_client: AsyncClient, account: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A completed registration stores the passkey, owned by the caller, with its public key."""
     body = await _register(authed_client, monkeypatch)
     assert body["nickname"] == "My phone"
     assert body["backed_up"] is True
 
-    doc = await get_credentials_collection().find_one({"_id": body["id"]})
+    passkey = await Passkey.get(body["id"])
+    assert passkey is not None
+    assert passkey.user_id == account.id
+    doc = await Passkey.get_pymongo_collection().find_one({"_id": body["id"]})
     assert doc is not None
-    assert doc["user_id"] == account.id
     assert doc["public_key"] == b"public-key-bytes"
 
 
@@ -201,6 +204,7 @@ async def test_the_public_key_never_leaves_the_server(
 
 
 async def test_registering_requires_a_session(client: AsyncClient) -> None:
+    """Unauthenticated requests to start a registration or list passkeys are rejected."""
     assert (await client.post("/api/me/passkeys/challenge")).status_code == 401
     assert (await client.get("/api/me/passkeys")).status_code == 401
 
@@ -220,6 +224,7 @@ async def test_a_second_registration_excludes_the_first(
 async def test_a_verified_assertion_signs_the_owner_in(
     client: AsyncClient, account: User, sign_in_as: SignInAs, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A successful passkey login mints a session belonging to the credential's registered owner."""
     await sign_in_as(client, account.id)
     registered = await _register(client, monkeypatch)
     await client.post("/api/auth/logout")
@@ -246,6 +251,7 @@ async def test_a_verified_assertion_signs_the_owner_in(
 async def test_an_unregistered_credential_is_refused(
     client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """An assertion naming a credential id that was never registered is refused."""
     started = (await client.post("/api/auth/passkey/challenge")).json()
     response = await client.post(
         "/api/auth/passkey/login",
@@ -279,15 +285,16 @@ async def test_the_sign_counter_is_advanced(
         },
     )
 
-    doc = await get_credentials_collection().find_one({"_id": registered["id"]})
-    assert doc is not None
-    assert doc["sign_count"] == 42
-    assert doc["last_used_at"] is not None
+    passkey = await Passkey.get(registered["id"])
+    assert passkey is not None
+    assert passkey.sign_count == 42
+    assert passkey.last_used_at is not None
 
 
 async def test_a_disabled_account_cannot_sign_in_with_a_passkey(
     client: AsyncClient, account: User, sign_in_as: SignInAs, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A verified passkey assertion for a disabled account is refused, same as a password login."""
     from shortimer.cache.db import get_users_collection
 
     await sign_in_as(client, account.id)
@@ -315,9 +322,10 @@ async def test_a_disabled_account_cannot_sign_in_with_a_passkey(
 async def test_deleting_a_passkey_removes_it(
     authed_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Deleting the caller's own passkey removes it."""
     registered = await _register(authed_client, monkeypatch)
     assert (await authed_client.delete(f"/api/me/passkeys/{registered['id']}")).status_code == 204
-    assert await get_credentials_collection().count_documents({}) == 0
+    assert await Passkey.find_all().count() == 0
 
 
 async def test_you_cannot_delete_someone_elses_passkey(
@@ -327,12 +335,13 @@ async def test_you_cannot_delete_someone_elses_passkey(
     sign_in_as: SignInAs,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Deleting another user's passkey id 404s and leaves the passkey in place."""
     await sign_in_as(client, account.id)
     registered = await _register(client, monkeypatch)
 
     await sign_in_as(client, admin_account.id)
     assert (await client.delete(f"/api/me/passkeys/{registered['id']}")).status_code == 404
-    assert await get_credentials_collection().count_documents({}) == 1
+    assert await Passkey.find_all().count() == 1
 
 
 async def test_the_listing_is_scoped_to_the_caller(
@@ -342,6 +351,7 @@ async def test_the_listing_is_scoped_to_the_caller(
     sign_in_as: SignInAs,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A passkey registered by one user is invisible in another user's listing."""
     await sign_in_as(client, account.id)
     await _register(client, monkeypatch)
 

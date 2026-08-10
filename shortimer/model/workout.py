@@ -1,13 +1,14 @@
-""""""
+"""A timer-ready workout, its building blocks, and the requests/responses around it."""
 
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import StrEnum
 from typing import Self
 
 from pydantic import BaseModel, Field, model_validator
 
 from shortimer.util.dedup import source_hash
+from shortimer.util.time import utcnow
 
 
 class WorkoutMode(StrEnum):
@@ -71,6 +72,7 @@ _REST_WORDS = frozenset(
 
 
 def _is_rest_word(text: str | None) -> bool:
+    """Whether `text`, stripped and case-folded, is exactly one of `_REST_WORDS`."""
     if not text:
         return False
     return text.strip().strip(".!:").casefold() in _REST_WORDS
@@ -158,17 +160,20 @@ class Workout(BaseModel):
 
     segments: list[WorkoutSegment] = Field(default_factory=list)
 
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
 
     @model_validator(mode="after")
     def _populate_source_hash(self) -> Self:
+        """Derive `source_hash` from `source_text` whenever the caller didn't supply one."""
         if self.source_text and not self.source_hash:
             self.source_hash = source_hash(self.source_text)
         return self
 
 
 class WorkoutParseRequest(BaseModel):
+    """Pasted workout text, ready to hand to the LLM parser."""
+
     # Bounded because this text is sent to the model — an unbounded paste is a
     # direct route to a large token bill. Real workouts are a few hundred
     # characters; crossfit.com's longest daily entries are ~2k.
@@ -177,6 +182,8 @@ class WorkoutParseRequest(BaseModel):
 
 
 class WorkoutCreateRequest(BaseModel):
+    """A client-built `Workout`, ready to save — skips the LLM parse entirely."""
+
     workout: Workout
 
 

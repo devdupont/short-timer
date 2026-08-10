@@ -10,18 +10,12 @@ cached rotation onto the last N dates on the way out, so the feed looks exactly
 like the dated ones on the home page without ever having stored a dated row.
 """
 
-from __future__ import annotations
-
 import logging
 from datetime import UTC, date, datetime, timedelta
 
-from shortimer.cache.db import get_hybrid_cache_collection
-from shortimer.cache.parse import (
-    SOURCE_HYBRID,
-    find_parse,
-    mark_permanent,
-    remember_parse,
-)
+from shortimer.cache._feed import FeedCache
+from shortimer.cache.parse import SOURCE_HYBRID
+from shortimer.model.feed_cache import HybridRotationCache
 from shortimer.service.hybrid import HybridWorkout, Rotation, fetch_rotation, is_rest_day
 from shortimer.service.llm import parse_workout_text
 
@@ -38,26 +32,23 @@ REFRESH_INTERVAL_SECONDS = 24 * 60 * 60
 _DOCUMENT_ID = "rotation"
 
 
+class _Cache(FeedCache[HybridRotationCache]):
+    """`FeedCache` bound to `HybridRotationCache`."""
+
+    document_model = HybridRotationCache
+
+
 async def last_refreshed_at() -> datetime | None:
     """When the rotation was most recently written, if ever."""
-    doc = await get_hybrid_cache_collection().find_one({"_id": _DOCUMENT_ID})
-    if doc is None:
-        return None
-    fetched = doc.get("fetched_at")
-    if not isinstance(fetched, datetime):
-        return None
-    # Mongo returns naive UTC datetimes; make comparisons safe.
-    return fetched if fetched.tzinfo else fetched.replace(tzinfo=UTC)
+    return await _Cache.last_refreshed_at({"_id": _DOCUMENT_ID})
 
 
 async def read_cached_rotation() -> Rotation | None:
-    doc = await get_hybrid_cache_collection().find_one({"_id": _DOCUMENT_ID})
-    if doc is None:
+    """The stored rotation, or None if it's never been fetched or is empty."""
+    entry = await HybridRotationCache.get(_DOCUMENT_ID)
+    if entry is None or not entry.days:
         return None
-    days = doc.get("days")
-    if not isinstance(days, dict) or not days:
-        return None
-    return Rotation(days={str(k): [str(x) for x in v] for k, v in days.items()})
+    return Rotation(days=entry.days)
 
 
 async def refresh_hybrid_cache(*, force: bool = False) -> bool:
@@ -67,22 +58,18 @@ async def refresh_hybrid_cache(*, force: bool = False) -> bool:
     changed in years shouldn't vanish from the home page because the site was
     briefly down.
     """
-    if not force:
-        last = await last_refreshed_at()
-        if last is not None and datetime.now(UTC) - last < MIN_REFRESH_INTERVAL:
-            logger.debug("Hybrid rotation still fresh; skipping refresh.")
-            return False
+    if not force and await _Cache.is_fresh(MIN_REFRESH_INTERVAL, {"_id": _DOCUMENT_ID}):
+        logger.debug("Hybrid rotation still fresh; skipping refresh.")
+        return False
 
     rotation = await fetch_rotation()
     if rotation is None:
         logger.warning("Could not fetch the Hybrid rotation; keeping existing cache.")
         return False
 
-    await get_hybrid_cache_collection().replace_one(
-        {"_id": _DOCUMENT_ID},
-        {"_id": _DOCUMENT_ID, "days": rotation.days, "fetched_at": datetime.now(UTC)},
-        upsert=True,
-    )
+    await HybridRotationCache(
+        id=_DOCUMENT_ID, days=rotation.days, fetched_at=datetime.now(UTC)
+    ).save()
     logger.info("Refreshed the Hybrid rotation (%d day(s)).", len(rotation.days))
     return True
 
@@ -98,26 +85,16 @@ async def ensure_wods_parsed() -> int:
     if rotation is None:
         return 0
 
-    parsed = 0
-    seen: set[str] = set()
-    for lines in rotation.days.values():
-        text = "\n".join(lines)
-        # Rest days have nothing to load, and repeats within the rotation are
-        # the same text — both are skipped before we reach the model.
-        if not text or text in seen or is_rest_day(text):
-            continue
-        seen.add(text)
-        if await find_parse(text) is not None:
-            await mark_permanent(text, source=SOURCE_HYBRID)
-            continue
-        try:
-            workout = await parse_workout_text(text, purpose="prewarm:hybrid")
-        except Exception:  # one bad day shouldn't stop the rest
-            logger.exception("Could not pre-parse Hybrid workout %r", text[:40])
-            continue
-        await remember_parse(workout, source=SOURCE_HYBRID)
-        parsed += 1
+    # Rest days have nothing to load, and repeats within the rotation are the
+    # same text — both are skipped before warming the pool. `dict.fromkeys`
+    # dedupes while keeping first-seen order.
+    texts = ("\n".join(lines) for lines in rotation.days.values())
+    eligible = [text for text in texts if text and not is_rest_day(text)]
+    candidates: list[tuple[str, str | None]] = [(text, None) for text in dict.fromkeys(eligible)]
 
+    parsed = await _Cache.warm_parse_pool(
+        candidates, parse=parse_workout_text, source=SOURCE_HYBRID, purpose="prewarm:hybrid"
+    )
     if parsed:
         logger.info("Pre-parsed %d Hybrid workout(s).", parsed)
     return parsed

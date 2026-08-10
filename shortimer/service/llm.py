@@ -5,8 +5,6 @@ mirrors `Workout`, so the response is always valid structured data rather than
 prose we'd have to parse ourselves.
 """
 
-from __future__ import annotations
-
 from functools import lru_cache
 
 from anthropic import AsyncAnthropic

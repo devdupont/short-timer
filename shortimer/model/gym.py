@@ -1,11 +1,11 @@
-""""""
+"""Gym platforms the server knows how to reach, and a user's stored connections."""
 
-from datetime import date
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 from shortimer.cache.crypto import SecretBox, SecretStatus
+from shortimer.model.feed_item import DatedFeedItem
 
 # --- Gym providers -----------------------------------------------------------
 # A gym's programming lives on whichever platform the gym pays for, reached by
@@ -67,26 +67,17 @@ class GymConnection(BaseModel):
         return bool(self.enabled and self.credential)
 
 
-class GymWod(BaseModel):
+class GymWod(DatedFeedItem):
     """One day's workout from a gym, whichever platform it came from.
-
-    Mirrors `crossfit.Wod` rather than reusing it: the two intakes share a
-    shape today but not a lifecycle — crossfit.com has rest days and a public
-    permalink per day, a gym has neither — and coupling them would mean every
-    change to one route rippling into the other.
 
     Lives here rather than beside a client because every provider produces
     one; `provider` records which did, so a card can say "View on SugarWOD"
-    without the frontend having to infer it from the URL.
+    without the frontend having to infer it from the URL. `url` is empty
+    rather than a link when the platform has no page a member can be sent to
+    without leaking their credential — the UI drops the link rather than
+    rendering a dead one.
     """
 
-    date: date
-    title: str
-    text: str
-    #: A "see it at the source" pointer, or empty when the platform has no
-    #: page we can link a member to without leaking their credential. The UI
-    #: drops the link rather than rendering a dead one.
-    url: str = ""
     provider: GymProvider
 
 

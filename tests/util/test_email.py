@@ -1,7 +1,5 @@
 """The Postmark sender, and the messages built for it."""
 
-from collections.abc import Generator
-
 import httpx
 import pytest
 import respx
@@ -13,15 +11,9 @@ from shortimer.util import email as email_module
 POSTMARK = "https://api.postmarkapp.com/email"
 
 
-@pytest.fixture(autouse=True)
-def _clear_settings_cache() -> Generator[None]:
-    get_settings.cache_clear()
-    yield
-    get_settings.cache_clear()
-
-
 @pytest.fixture
 def sending_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Configure email as on and reachable, for the tests that exercise an actual send."""
     monkeypatch.setenv("EMAIL_ENABLED", "true")
     monkeypatch.setenv("POSTMARK_SERVER_TOKEN", "test-token")
     monkeypatch.setenv("PUBLIC_BASE_URL", "https://shortimer.com")
@@ -52,6 +44,7 @@ def test_links_are_built_against_the_public_base_url(
 
 
 def test_a_trailing_slash_does_not_double_up(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`PUBLIC_BASE_URL` with a trailing slash doesn't produce a doubled slash in the link."""
     monkeypatch.setenv("PUBLIC_BASE_URL", "https://shortimer.com/")
     get_settings.cache_clear()
     assert "https://shortimer.com/verify" in email_module.verify_message("a@b.com", "t").text
@@ -67,6 +60,7 @@ def test_the_reset_message_warns_that_it_signs_you_out() -> None:
 
 @respx.mock
 async def test_send_posts_the_expected_payload(sending_enabled: None) -> None:
+    """A send hits Postmark with the server token and the message fields, correctly mapped."""
     route = respx.post(POSTMARK).mock(return_value=Response(200, json={"MessageID": "1"}))
 
     await email_module.send(email_module.Message(to="a@b.com", subject="Subject", text="Body"))
@@ -93,6 +87,7 @@ async def test_the_from_address_is_on_the_sending_subdomain(sending_enabled: Non
 
 @respx.mock
 async def test_a_rejected_send_raises(sending_enabled: None) -> None:
+    """Postmark answering 422 raises `EmailError` rather than being swallowed."""
     respx.post(POSTMARK).mock(return_value=Response(422, json={"ErrorCode": 300}))
     with pytest.raises(email_module.EmailError):
         await email_module.send(email_module.Message(to="a@b.com", subject="S", text="B"))
@@ -100,6 +95,7 @@ async def test_a_rejected_send_raises(sending_enabled: None) -> None:
 
 @respx.mock
 async def test_a_provider_outage_raises_rather_than_hanging(sending_enabled: None) -> None:
+    """A connection failure to Postmark also raises `EmailError`."""
     respx.post(POSTMARK).mock(side_effect=httpx.ConnectError("no route"))
     with pytest.raises(email_module.EmailError):
         await email_module.send(email_module.Message(to="a@b.com", subject="S", text="B"))

@@ -25,8 +25,6 @@ readable for a while after it should be gone. The index exists to stop the
 collection growing without bound; it is not the check.
 """
 
-from __future__ import annotations
-
 import logging
 from datetime import UTC, datetime, timedelta
 
@@ -34,6 +32,7 @@ from shortimer.auth.tokens import hash_token as _hash
 from shortimer.auth.tokens import new_token
 from shortimer.cache.db import get_sessions_collection
 from shortimer.config import get_settings
+from shortimer.util.time import as_utc
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +53,7 @@ def _as_utc(value: object) -> datetime | None:
     """
     if not isinstance(value, datetime):
         return None
-    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+    return as_utc(value)
 
 
 async def create_session(user_id: str, *, user_agent: str | None = None) -> str:

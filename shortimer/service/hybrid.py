@@ -24,8 +24,6 @@ before failure", which is a real workout with no clock to run — see
 `WorkoutMode.CUSTOM` and the untimed branch of the timer view.
 """
 
-from __future__ import annotations
-
 import logging
 import re
 from datetime import date
@@ -33,6 +31,8 @@ from datetime import date
 import httpx
 from bs4 import BeautifulSoup
 from pydantic import BaseModel
+
+from shortimer.model.feed_item import DatedFeedItem
 
 logger = logging.getLogger(__name__)
 
@@ -56,13 +56,8 @@ def is_rest_day(text: str) -> bool:
     return bool(_REST_DAY.match(text.strip()))
 
 
-class HybridWorkout(BaseModel):
+class HybridWorkout(DatedFeedItem):
     """One day of the rotation, projected onto a real date."""
-
-    date: date
-    title: str
-    text: str
-    url: str
 
 
 class Rotation(BaseModel):

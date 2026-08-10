@@ -14,8 +14,6 @@ gym full of people behind one WiFi lock each other out. Only failures are
 charged, so signing in correctly never costs anything.
 """
 
-from __future__ import annotations
-
 import json
 import logging
 import secrets
@@ -30,6 +28,7 @@ from shortimer.auth.passwords import hash_password, verify_password
 from shortimer.auth.session import current_owner, end_session, session_token, start_session
 from shortimer.cache.session import revoke_all_sessions
 from shortimer.config import get_settings
+from shortimer.errors import not_found
 from shortimer.metrics import record_login
 from shortimer.model.passkey import PasskeyChallengeResponse, PasskeyLoginRequest
 from shortimer.model.register import (
@@ -79,6 +78,7 @@ def _dummy_hash() -> str:
 
 
 def _too_short() -> HTTPException:
+    """The 422 raised by every endpoint that accepts a new password."""
     minimum = get_settings().password_min_length
     return HTTPException(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -93,6 +93,7 @@ async def _charge_failure(request: Request, email: str) -> None:
 
 
 async def _check_limits(request: Request, email: str) -> None:
+    """Reject if either the address or the caller is already over the login limit."""
     await peek(login_limit(), f"ip:{client_ip(request)}")
     await peek(login_limit(), f"email:{normalize_email(email)}")
 
@@ -170,6 +171,7 @@ async def register(body: RegisterRequest, request: Request, response: Response) 
 
 @router.post("/login", status_code=status.HTTP_204_NO_CONTENT)
 async def login(body: LoginRequest, request: Request, response: Response) -> None:
+    """Email/password sign-in. Answers wrong-password and unknown-address identically."""
     await _check_limits(request, body.email)
 
     user = await get_user_by_email(body.email)
@@ -232,6 +234,7 @@ async def passkey_login_challenge(request: Request) -> PasskeyChallengeResponse:
 
 @router.post("/passkey/login", status_code=status.HTTP_204_NO_CONTENT)
 async def passkey_login(body: PasskeyLoginRequest, request: Request, response: Response) -> None:
+    """Finish a passkey sign-in and start the session."""
     try:
         user_id = await passkeys.finish_authentication(body.challenge_handle, body.credential)
     except passkeys.PasskeyError as exc:
@@ -271,6 +274,7 @@ async def _send_verification(user_id: str, address: str) -> None:
 
 @router.post("/verify", response_model=MeResponse)
 async def verify_email(body: VerifyEmailRequest) -> MeResponse:
+    """Redeem an email-verification token."""
     user_id = await email_tokens.redeem(TokenKind.VERIFY, body.token)
     if user_id is None:
         raise HTTPException(
@@ -280,12 +284,13 @@ async def verify_email(body: VerifyEmailRequest) -> MeResponse:
     await mark_email_verified(user_id)
     user = await get_user(user_id)
     if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        not_found("User not found")
     return to_me(user)
 
 
 @router.post("/resend-verification", status_code=status.HTTP_204_NO_CONTENT)
 async def resend_verification(owner_id: Annotated[str, Depends(current_owner)]) -> None:
+    """Re-send the verification email, or no-op if the caller is already verified."""
     user = await get_user(owner_id)
     if user is None or user.email is None or user.email_verified:
         # Nothing to do, and nothing worth reporting — a verified user asking

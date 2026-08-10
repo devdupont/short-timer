@@ -1,3 +1,5 @@
+"""The shared parse pool: retention, permanent-source promotion, and provenance."""
+
 from datetime import UTC, datetime, timedelta
 
 from shortimer.cache.db import get_parse_cache_collection
@@ -18,16 +20,19 @@ USER_TEXT = "Coach's whiteboard special\n3 rounds:\n10 burpees"
 
 
 def _workout(text: str) -> Workout:
+    """A minimal `Workout` carrying `text` as its source, for feeding into `remember_parse`."""
     return Workout(name="Probe", mode=WorkoutMode.FOR_TIME, source_text=text)
 
 
 async def _age_entry(text: str, age: timedelta) -> None:
+    """Backdate the pool entry for `text` by `age`, to put it past or short of retention."""
     await get_parse_cache_collection().update_one(
         {"_id": source_hash(text)}, {"$set": {"created_at": datetime.now(UTC) - age}}
     )
 
 
 async def test_user_parses_expire_but_crossfit_ones_do_not() -> None:
+    """A permanent-source entry and a user entry, both aged past retention: only the user one prunes."""
     await remember_parse(_workout(CROSSFIT_TEXT), source=SOURCE_CROSSFIT)
     await remember_parse(_workout(USER_TEXT), source=SOURCE_USER)
 
@@ -41,6 +46,7 @@ async def test_user_parses_expire_but_crossfit_ones_do_not() -> None:
 
 
 async def test_recent_user_parses_are_kept() -> None:
+    """A user entry one day short of the retention window survives a prune."""
     await remember_parse(_workout(USER_TEXT), source=SOURCE_USER)
     await _age_entry(USER_TEXT, USER_RETENTION - timedelta(days=1))
 
@@ -59,6 +65,7 @@ async def test_a_user_parse_of_a_wod_gets_promoted_to_permanent() -> None:
 
 
 async def test_user_parse_never_demotes_a_permanent_entry() -> None:
+    """Re-recording a permanent entry's text as a user parse leaves its provenance unchanged."""
     await remember_parse(_workout(CROSSFIT_TEXT), source=SOURCE_CROSSFIT)
     # A user pasting the same text re-records it; provenance must survive.
     await remember_parse(_workout(CROSSFIT_TEXT), source=SOURCE_USER)

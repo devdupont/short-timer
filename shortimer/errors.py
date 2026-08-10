@@ -16,13 +16,12 @@ fine, because they run in `ExceptionMiddleware`, which sits inside CORS. See
 `register_error_handlers` for the ordering this depends on.
 """
 
-from __future__ import annotations
-
 import logging
 from collections.abc import Awaitable, Callable
+from typing import NoReturn
 
 import anthropic
-from fastapi import FastAPI, Request, Response, status
+from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from pymongo.errors import PyMongoError
 
@@ -30,8 +29,14 @@ logger = logging.getLogger(__name__)
 
 
 def _json(status_code: int, detail: str, retry_after: int | None = None) -> JSONResponse:
+    """The `{"detail": ...}` shape every handler below returns."""
     headers = {"Retry-After": str(retry_after)} if retry_after else None
     return JSONResponse(status_code=status_code, content={"detail": detail}, headers=headers)
+
+
+def not_found(detail: str) -> NoReturn:
+    """Raise the 404 every route reaches for once it can't find its record."""
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
 
 
 def register_error_handlers(app: FastAPI) -> None:
@@ -45,6 +50,7 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(anthropic.APITimeoutError)
     async def _timeout(request: Request, exc: anthropic.APITimeoutError) -> JSONResponse:
+        """A model call that took too long."""
         logger.warning("Anthropic request timed out: %s %s", request.method, request.url.path)
         return _json(
             status.HTTP_504_GATEWAY_TIMEOUT,
@@ -54,6 +60,7 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(anthropic.APIConnectionError)
     async def _unreachable(request: Request, exc: anthropic.APIConnectionError) -> JSONResponse:
+        """Anthropic couldn't be reached at all."""
         logger.warning("Could not reach Anthropic: %s", exc)
         return _json(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -63,6 +70,7 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(anthropic.RateLimitError)
     async def _upstream_throttled(request: Request, exc: anthropic.RateLimitError) -> JSONResponse:
+        """Anthropic itself rate-limited this deployment."""
         logger.warning("Anthropic rate limited us.")
         return _json(
             status.HTTP_429_TOO_MANY_REQUESTS,
@@ -72,6 +80,7 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(anthropic.AuthenticationError)
     async def _bad_key(request: Request, exc: anthropic.AuthenticationError) -> JSONResponse:
+        """Anthropic rejected our own API key — a deployment problem, not a caller one."""
         # A deployment problem, not something the caller can fix — say so
         # plainly without hinting at credentials.
         logger.error("Anthropic rejected our API key; check ANTHROPIC_API_KEY.")
@@ -82,6 +91,7 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(anthropic.APIError)
     async def _upstream_error(request: Request, exc: anthropic.APIError) -> JSONResponse:
+        """Catch-all for any other Anthropic API failure."""
         logger.exception("Anthropic call failed.")
         return _json(
             status.HTTP_502_BAD_GATEWAY,
@@ -91,6 +101,7 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(PyMongoError)
     async def _database_down(request: Request, exc: PyMongoError) -> JSONResponse:
+        """Any Mongo failure — connection, timeout, or otherwise."""
         logger.exception("Database error on %s %s", request.method, request.url.path)
         return _json(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -102,6 +113,8 @@ def register_error_handlers(app: FastAPI) -> None:
     async def _unexpected(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
+        """The catch-all for anything not handled above — see the module docstring for why
+        this is middleware rather than an `Exception` handler."""
         # Last resort. Log everything, return nothing that describes internals.
         # `HTTPException` and every class handled above are already responses
         # by the time they reach here, so this only ever sees a genuine bug.

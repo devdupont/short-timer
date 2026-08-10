@@ -11,9 +11,7 @@ whether a connection the user already made is actually working. Adding a gym
 platform is then a server change only.
 """
 
-from __future__ import annotations
-
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from shortimer.auth.session import current_owner, require_session
@@ -25,6 +23,7 @@ from shortimer.cache.gym import (
     get_wods,
     resolve_source,
 )
+from shortimer.errors import not_found
 from shortimer.model.gym import GymWod
 from shortimer.service.gym_providers import GymProviderInfo, all_info, spec_for
 from shortimer.users import get_user
@@ -68,7 +67,7 @@ async def list_connection_health(owner_id: str = Depends(current_owner)) -> list
     """Whether each of the caller's stored connections has ever fetched."""
     user = await get_user(owner_id)
     if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        not_found("User not found")
     return await connection_health(user)
 
 
@@ -77,9 +76,10 @@ async def list_gym_wods(
     days: int = Query(_DEFAULT_DAYS, ge=1, le=CACHE_DAYS),
     owner_id: str = Depends(current_owner),
 ) -> GymFeed:
+    """The caller's own gym feed — empty and `configured=False` if they have none set up."""
     user = await get_user(owner_id)
     if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        not_found("User not found")
 
     source = resolve_source(user)
     if source is None:

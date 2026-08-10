@@ -15,8 +15,6 @@ Nothing here is private: an entry is only ever returned to someone who already
 holds the identical source text.
 """
 
-from __future__ import annotations
-
 import logging
 from datetime import UTC, datetime, timedelta
 
@@ -60,6 +58,7 @@ USER_RETENTION = timedelta(days=365)
 
 
 def _payload(workout: Workout) -> dict[str, object]:
+    """`workout` as storable JSON, stripped of the fields a fresh copy must regenerate."""
     data = workout.model_dump(mode="json")
     for field in _DROPPED_FIELDS:
         data.pop(field, None)

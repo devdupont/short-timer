@@ -6,19 +6,9 @@ daily background task keeps warm — no request ever waits on crossfit.com. The
 the user saves workouts.
 """
 
-from __future__ import annotations
-
-from fastapi import APIRouter, Depends, Query
-
-from shortimer.auth.session import current_owner, require_session
 from shortimer.cache.crossfit import CACHE_DAYS, get_wods
-from shortimer.cache.db import get_workouts_collection
+from shortimer.router._feed import build_feed_router
 from shortimer.service.crossfit import Wod
-from shortimer.util.dedup import source_hash
-
-router = APIRouter(prefix="/api/wods", tags=["wods"], dependencies=[Depends(require_session)])
-
-_DEFAULT_DAYS = 7
 
 
 class WodEntry(Wod):
@@ -27,19 +17,11 @@ class WodEntry(Wod):
     saved_workout_id: str | None = None
 
 
-@router.get("", response_model=list[WodEntry])
-async def list_wods(
-    days: int = Query(_DEFAULT_DAYS, ge=1, le=CACHE_DAYS),
-    owner_id: str = Depends(current_owner),
-) -> list[WodEntry]:
-    wods = await get_wods(days)
-    collection = get_workouts_collection()
-    entries: list[WodEntry] = []
-    for wod in wods:
-        saved = await collection.find_one(
-            {"owner_id": owner_id, "source_hash": source_hash(wod.text)}, {"_id": 1}
-        )
-        entries.append(
-            WodEntry(**wod.model_dump(), saved_workout_id=saved["_id"] if saved else None)
-        )
-    return entries
+router = build_feed_router(
+    prefix="/api/wods",
+    tag="wods",
+    path="",
+    get_wods=get_wods,
+    entry_cls=WodEntry,
+    cache_days=CACHE_DAYS,
+)

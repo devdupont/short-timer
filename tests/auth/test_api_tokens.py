@@ -1,7 +1,5 @@
 """Per-user API tokens, and the MCP server that authenticates with one."""
 
-from collections.abc import Generator
-
 import pytest
 from conftest import TEST_PASSWORD
 from httpx import AsyncClient
@@ -17,17 +15,11 @@ READ = [ApiTokenScope.LIBRARY_READ]
 BOTH = [ApiTokenScope.LIBRARY_READ, ApiTokenScope.LIBRARY_WRITE]
 
 
-@pytest.fixture(autouse=True)
-def _clear_settings_cache() -> Generator[None]:
-    get_settings.cache_clear()
-    yield
-    get_settings.cache_clear()
-
-
 # --- Minting -----------------------------------------------------------------
 
 
 async def test_creating_a_token_returns_it_exactly_once(authed_client: AsyncClient) -> None:
+    """The raw token value comes back once at creation, and the listing carries only its prefix."""
     response = await authed_client.post(
         "/api/me/tokens",
         json={"name": "MCP", "scopes": ["library:read"], "current_password": TEST_PASSWORD},
@@ -54,6 +46,7 @@ async def test_minting_requires_the_current_password(authed_client: AsyncClient)
 
 
 async def test_a_token_needs_at_least_one_scope(authed_client: AsyncClient) -> None:
+    """A creation request with an empty scopes list is rejected."""
     response = await authed_client.post(
         "/api/me/tokens",
         json={"name": "MCP", "scopes": [], "current_password": TEST_PASSWORD},
@@ -62,10 +55,12 @@ async def test_a_token_needs_at_least_one_scope(authed_client: AsyncClient) -> N
 
 
 async def test_tokens_require_a_session(client: AsyncClient) -> None:
+    """An unauthenticated request to list tokens is rejected."""
     assert (await client.get("/api/me/tokens")).status_code == 401
 
 
 async def test_the_stored_form_is_not_the_token(account: User) -> None:
+    """The stored document holds the token's id and hash, never the raw value."""
     raw, token = await api_tokens.create_token(user_id=account.id, name="MCP", scopes=READ)
     docs = [d async for d in get_api_tokens_collection().find({})]
     assert raw not in str(docs)
@@ -76,6 +71,7 @@ async def test_the_stored_form_is_not_the_token(account: User) -> None:
 
 
 async def test_revoking_a_token_stops_it_working(authed_client: AsyncClient, account: User) -> None:
+    """A revoked token no longer resolves to a user."""
     raw, token = await api_tokens.create_token(user_id=account.id, name="MCP", scopes=READ)
     assert await api_tokens.resolve_token(raw) is not None
 
@@ -86,6 +82,7 @@ async def test_revoking_a_token_stops_it_working(authed_client: AsyncClient, acc
 async def test_you_cannot_revoke_someone_elses_token(
     authed_client: AsyncClient, admin_account: User
 ) -> None:
+    """Deleting another user's token id 404s and leaves the token working."""
     raw, token = await api_tokens.create_token(user_id=admin_account.id, name="Theirs", scopes=READ)
 
     assert (await authed_client.delete(f"/api/me/tokens/{token.id}")).status_code == 404
@@ -96,6 +93,7 @@ async def test_you_cannot_revoke_someone_elses_token(
 async def test_the_listing_is_scoped_to_the_caller(
     authed_client: AsyncClient, account: User, admin_account: User
 ) -> None:
+    """Two users' tokens exist; the listing shows only the caller's own."""
     await api_tokens.create_token(user_id=account.id, name="Mine", scopes=READ)
     await api_tokens.create_token(user_id=admin_account.id, name="Theirs", scopes=READ)
 
@@ -117,6 +115,7 @@ async def test_use_is_recorded(account: User) -> None:
 
 
 async def test_mcp_refuses_without_a_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No `MCP_API_TOKEN` configured at all refuses with a "not set" error."""
     monkeypatch.setenv("MCP_API_TOKEN", "")
     get_settings.cache_clear()
     with pytest.raises(mcp_server.NotAuthorized, match="not set"):
@@ -124,6 +123,7 @@ async def test_mcp_refuses_without_a_token(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 async def test_mcp_refuses_an_unknown_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A token value that was never issued refuses with a "not valid" error."""
     monkeypatch.setenv("MCP_API_TOKEN", "st_made-up")
     get_settings.cache_clear()
     with pytest.raises(mcp_server.NotAuthorized, match="not valid"):
@@ -146,6 +146,7 @@ async def test_mcp_refuses_a_revoked_token(account: User, monkeypatch: pytest.Mo
 async def test_a_read_only_token_cannot_write(
     account: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A `library:read`-only token can search but is refused on a write tool."""
     raw, _ = await api_tokens.create_token(user_id=account.id, name="MCP", scopes=READ)
     monkeypatch.setenv("MCP_API_TOKEN", raw)
     get_settings.cache_clear()
@@ -176,6 +177,7 @@ async def test_a_written_workout_belongs_to_the_tokens_owner(
 async def test_reads_never_cross_owners(
     account: User, admin_account: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A token scoped to one owner can search and fetch only that owner's workouts."""
     from shortimer.cache.db import get_workouts_collection
     from shortimer.model.workout import Workout, WorkoutMode
 

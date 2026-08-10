@@ -1,8 +1,11 @@
+"""The FastAPI app: router wiring, startup/shutdown, and the background refresh loops."""
+
 import asyncio
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
 
+from beanie import init_beanie
 from fastapi import FastAPI, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -22,6 +25,16 @@ from shortimer.cache.parse import prune_expired_parses
 from shortimer.config import get_settings
 from shortimer.errors import register_error_handlers
 from shortimer.metrics import record_feed_refresh
+from shortimer.model.feed_cache import (
+    Concept2CacheEntry,
+    GymCacheEntry,
+    HybridRotationCache,
+    WodCacheEntry,
+)
+from shortimer.model.passkey import Passkey
+from shortimer.model.register import Invite
+from shortimer.model.token import ApiToken
+from shortimer.model.user import User
 from shortimer.router import (
     admin,
     auth,
@@ -93,6 +106,7 @@ async def _prune_parses_monthly() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Init Beanie and indexes, start the background refresh loops, and tear them down on exit."""
     # Best-effort: a database that's slow or unreachable at boot shouldn't
     # stop the app from serving.
     #
@@ -102,6 +116,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # on an empty database, so every document has been written by code that
     # sets all three.
     try:
+        await init_beanie(
+            database=get_database(),
+            document_models=[
+                User,
+                ApiToken,
+                Invite,
+                Passkey,
+                Concept2CacheEntry,
+                WodCacheEntry,
+                GymCacheEntry,
+                HybridRotationCache,
+            ],
+        )
         await ensure_indexes()
     except Exception:  # startup maintenance is non-critical
         logger.exception("Skipped startup database maintenance.")
@@ -206,6 +233,7 @@ async def ready() -> JSONResponse:
 
 
 def run() -> None:
+    """Entry point for `hatch run serve`: run the app under uvicorn with reload on."""
     import uvicorn
 
     uvicorn.run("shortimer.app:app", host="0.0.0.0", port=8000, reload=True)

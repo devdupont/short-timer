@@ -1,3 +1,5 @@
+"""Shared fixtures: a mocked Mongo, an ASGI test client, and pre-built accounts/sessions."""
+
 import os
 
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-anthropic-key")
@@ -8,18 +10,29 @@ os.environ.setdefault("SESSION_COOKIE_SECURE", "false")
 # that needs a token reads it from the database rather than an inbox.
 os.environ.setdefault("EMAIL_ENABLED", "false")
 
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Generator
 from typing import Any
 
 import pytest
+from beanie import init_beanie
 from httpx import ASGITransport, AsyncClient
-from mongomock_motor import AsyncMongoMockClient
+from mongomock_motor import AsyncMongoMockClient, AsyncMongoMockDatabase
 
 from shortimer.app import app
 from shortimer.auth.session import SESSION_COOKIE_NAME
 from shortimer.cache import db as db_module
 from shortimer.cache.session import create_session
+from shortimer.config import get_settings
+from shortimer.model.feed_cache import (
+    Concept2CacheEntry,
+    GymCacheEntry,
+    HybridRotationCache,
+    WodCacheEntry,
+)
+from shortimer.model.passkey import Passkey
+from shortimer.model.register import Invite
 from shortimer.model.status import Role
+from shortimer.model.token import ApiToken
 from shortimer.model.user import User
 from shortimer.service import llm as llm_module
 from shortimer.users import create_user
@@ -27,6 +40,16 @@ from shortimer.users import create_user
 #: The account `authed_client` signs in as. Long enough to clear the minimum.
 TEST_EMAIL = "athlete@example.com"
 TEST_PASSWORD = "correct-horse-battery-staple"
+
+_real_list_collection_names = AsyncMongoMockDatabase.list_collection_names
+
+
+async def _list_collection_names_compat(self: Any, *args: Any, **kwargs: Any) -> Any:
+    """`init_beanie` calls this with `authorizedCollections`/`nameOnly` kwargs
+    real MongoDB (and Motor) accept but plain `mongomock` doesn't implement."""
+    kwargs.pop("authorizedCollections", None)
+    kwargs.pop("nameOnly", None)
+    return await _real_list_collection_names(self, *args, **kwargs)
 
 
 @pytest.fixture(autouse=True)
@@ -41,7 +64,35 @@ async def _mock_mongo(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     client: AsyncMongoMockClient[Any] = AsyncMongoMockClient()
     monkeypatch.setattr(db_module, "get_client", lambda: client)
+    monkeypatch.setattr(
+        AsyncMongoMockDatabase, "list_collection_names", _list_collection_names_compat
+    )
+    await init_beanie(
+        database=db_module.get_database(),
+        document_models=[
+            User,
+            ApiToken,
+            Invite,
+            Passkey,
+            Concept2CacheEntry,
+            WodCacheEntry,
+            GymCacheEntry,
+            HybridRotationCache,
+        ],
+    )
     await db_module.ensure_indexes()
+
+
+@pytest.fixture(autouse=True)
+def _clear_settings_cache() -> Generator[None]:
+    """Clear the cached `Settings` before and after each test, so env patches take effect.
+
+    Every submodule test directory used to redeclare this identically; it's
+    cheap and safe to run unconditionally, so it lives here once instead.
+    """
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 @pytest.fixture(autouse=True)
@@ -57,6 +108,7 @@ def _fresh_anthropic_client() -> None:
 
 @pytest.fixture
 async def client() -> AsyncIterator[AsyncClient]:
+    """An unauthenticated ASGI client against the real app, no network involved."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
@@ -92,6 +144,7 @@ def sign_in_as() -> Callable[[AsyncClient, str], Awaitable[str]]:
     """
 
     async def _sign_in(client: AsyncClient, user_id: str) -> str:
+        """Create a real session for `user_id` and attach its cookie to `client`."""
         token = await create_session(user_id)
         client.cookies.set(SESSION_COOKIE_NAME, token)
         return token

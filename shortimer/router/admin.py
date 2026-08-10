@@ -9,8 +9,6 @@ Refusals are 404, not 403, matching the operator metrics — an endpoint you may
 not use shouldn't confirm that it exists.
 """
 
-from __future__ import annotations
-
 import logging
 from typing import Annotated
 
@@ -44,7 +42,7 @@ class AdminUserView(BaseModel):
     has_password: bool
 
 
-@router.post("/invites", response_model=InviteCreatedResponse)
+@router.post("/invites", response_model=InviteCreatedResponse, response_model_by_alias=False)
 async def create_invite(body: InviteCreateRequest, admin: Admin) -> InviteCreatedResponse:
     """Mint an invite, emailing it when an address was given.
 
@@ -70,13 +68,15 @@ async def create_invite(body: InviteCreateRequest, admin: Admin) -> InviteCreate
     return InviteCreatedResponse(invite=invite, token=token, link=link, emailed=emailed)
 
 
-@router.get("/invites", response_model=list[Invite])
+@router.get("/invites", response_model=list[Invite], response_model_by_alias=False)
 async def list_invites(admin: Admin) -> list[Invite]:
+    """Every invite ever issued, redeemed or not."""
     return await invites.list_invites()
 
 
 @router.delete("/invites/{invite_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def revoke_invite(invite_id: str, admin: Admin) -> None:
+    """Revoke an unredeemed invite."""
     if not await invites.revoke_invite(invite_id):
         # Either it never existed or it's already been redeemed, and a
         # redeemed invite is kept on purpose as a record of how an account
@@ -89,6 +89,7 @@ async def revoke_invite(invite_id: str, admin: Admin) -> None:
 
 @router.get("/users", response_model=list[AdminUserView])
 async def list_users(admin: Admin) -> list[AdminUserView]:
+    """The 200 most recently created accounts."""
     from shortimer.cache.db import get_users_collection
 
     out: list[AdminUserView] = []

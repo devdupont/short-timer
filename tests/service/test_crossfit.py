@@ -1,3 +1,5 @@
+"""The crossfit.com feed: fetch, cache, pre-parse, and the `/api/wods` endpoint."""
+
 from datetime import date
 
 import httpx
@@ -43,6 +45,7 @@ async def test_wods_are_served_from_cache_without_refetching() -> None:
 
 @respx.mock
 async def test_refresh_keeps_stale_cache_when_upstream_fails() -> None:
+    """crossfit.com going down mid-run leaves the previously cached days untouched."""
     respx.route(url__regex=r"https://www\.crossfit\.com/workout/.*").mock(
         return_value=Response(200, json=_WOD_JSON)
     )
@@ -66,6 +69,7 @@ async def test_wods_are_parsed_once_and_shared(monkeypatch: pytest.MonkeyPatch) 
     calls = 0
 
     async def counting_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
+        """A fake `parse_workout_text` that counts its own calls instead of hitting the model."""
         nonlocal calls
         calls += 1
         return Workout(name="Parsed", mode=WorkoutMode.FOR_TIME, source_text=text)
@@ -90,6 +94,7 @@ async def test_wods_are_parsed_once_and_shared(monkeypatch: pytest.MonkeyPatch) 
 
 @respx.mock
 async def test_rest_days_are_not_parsed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A day whose text is a scheduled rest is skipped by pre-parsing entirely."""
     respx.route(url__regex=r"https://www\.crossfit\.com/workout/.*").mock(
         return_value=Response(
             200, json={"wods": {"title": "Rest", "wodRaw": "**Rest Day**\n\nA hero story."}}
@@ -97,6 +102,7 @@ async def test_rest_days_are_not_parsed(monkeypatch: pytest.MonkeyPatch) -> None
     )
 
     async def exploding_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
+        """A fake parser that fails the test if it's ever called."""
         raise AssertionError("rest days have no workout to parse")
 
     monkeypatch.setattr("shortimer.cache.crossfit.parse_workout_text", exploding_parse)
@@ -109,12 +115,14 @@ async def test_rest_days_are_not_parsed(monkeypatch: pytest.MonkeyPatch) -> None
 async def test_refetch_preserves_parse_but_stale_text_invalidates_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Re-fetching identical text costs no re-parse; crossfit.com editing the text does."""
     respx.route(url__regex=r"https://www\.crossfit\.com/workout/.*").mock(
         return_value=Response(200, json=_WOD_JSON)
     )
     calls = 0
 
     async def counting_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
+        """A fake `parse_workout_text` that counts its own calls instead of hitting the model."""
         nonlocal calls
         calls += 1
         return Workout(name="Parsed", mode=WorkoutMode.FOR_TIME, source_text=text)
@@ -142,6 +150,7 @@ async def test_refetch_preserves_parse_but_stale_text_invalidates_it(
 
 @respx.mock
 async def test_refresh_skips_when_cache_is_fresh() -> None:
+    """An unforced refresh right after a fresh one is a no-op rather than a re-fetch."""
     respx.route(url__regex=r"https://www\.crossfit\.com/workout/.*").mock(
         return_value=Response(200, json=_WOD_JSON)
     )
@@ -152,6 +161,7 @@ async def test_refresh_skips_when_cache_is_fresh() -> None:
 
 @respx.mock
 async def test_fetch_wod_parses_json() -> None:
+    """A successful JSON response yields a Wod with title, text, and the human-facing URL."""
     respx.get("https://www.crossfit.com/workout/2026/07/18").mock(
         return_value=Response(200, json=_WOD_JSON)
     )
@@ -165,6 +175,7 @@ async def test_fetch_wod_parses_json() -> None:
 
 @respx.mock
 async def test_fetch_wod_skips_server_error() -> None:
+    """A 502 from crossfit.com is treated as a missing day, not an error."""
     respx.get("https://www.crossfit.com/workout/2026/07/12").mock(return_value=Response(502))
     async with httpx.AsyncClient() as http:
         assert await fetch_wod(http, date(2026, 7, 12)) is None
@@ -172,6 +183,7 @@ async def test_fetch_wod_skips_server_error() -> None:
 
 @respx.mock
 async def test_fetch_wod_skips_empty_body() -> None:
+    """A 200 with no `wodRaw` text is treated as a missing day."""
     respx.get("https://www.crossfit.com/workout/2026/07/25").mock(
         return_value=Response(200, json={"wods": {"title": "Future", "wodRaw": ""}})
     )
@@ -181,6 +193,7 @@ async def test_fetch_wod_skips_empty_body() -> None:
 
 @respx.mock
 async def test_wods_endpoint_marks_saved(authed_client: AsyncClient) -> None:
+    """A WOD whose text matches a workout already in the caller's library reports its saved id."""
     respx.route(url__regex=r"https://www\.crossfit\.com/workout/.*").mock(
         return_value=Response(200, json=_WOD_JSON)
     )
@@ -207,6 +220,7 @@ async def test_wods_endpoint_marks_saved(authed_client: AsyncClient) -> None:
 
 @respx.mock
 async def test_wods_endpoint_unsaved_is_null(authed_client: AsyncClient) -> None:
+    """A WOD not in the caller's library reports `saved_workout_id` as null."""
     respx.route(url__regex=r"https://www\.crossfit\.com/workout/.*").mock(
         return_value=Response(200, json=_WOD_JSON)
     )
@@ -216,11 +230,13 @@ async def test_wods_endpoint_unsaved_is_null(authed_client: AsyncClient) -> None
 
 
 async def test_wods_requires_auth(client: AsyncClient) -> None:
+    """An unauthenticated request to the feed is rejected."""
     assert (await client.get("/api/wods")).status_code == 401
 
 
 @respx.mock
 async def test_fetch_recent_wods_skips_failures() -> None:
+    """One failing day among the requested window is dropped, not fatal to the rest."""
     respx.get("https://www.crossfit.com/workout/2026/07/18").mock(
         return_value=Response(200, json=_WOD_JSON)
     )

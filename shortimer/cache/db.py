@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 @lru_cache
 def get_client() -> AsyncMongoClient[dict[str, Any]]:
+    """The one client for the process, created lazily on first use."""
     settings = get_settings()
     return AsyncMongoClient(
         settings.mongodb_uri,
@@ -31,42 +32,18 @@ def get_client() -> AsyncMongoClient[dict[str, Any]]:
 
 
 def get_database() -> AsyncDatabase[dict[str, Any]]:
+    """The configured database, off the shared client."""
     return get_client()[get_settings().mongodb_db_name]
 
 
 def get_workouts_collection() -> AsyncCollection[dict[str, Any]]:
+    """Saved workouts, one document per owner's library entry."""
     return get_database()["workouts"]
-
-
-def get_wod_cache_collection() -> AsyncCollection[dict[str, Any]]:
-    """Cached crossfit.com Workout of the Day pages, keyed by date."""
-    return get_database()["wod_cache"]
-
-
-def get_concept2_cache_collection() -> AsyncCollection[dict[str, Any]]:
-    """Cached Concept2 erg Workouts of the Day, keyed by date."""
-    return get_database()["concept2_cache"]
-
-
-def get_hybrid_cache_collection() -> AsyncCollection[dict[str, Any]]:
-    """The Hybrid Calisthenics weekly rotation — a single document, not dated rows."""
-    return get_database()["hybrid_cache"]
 
 
 def get_parse_cache_collection() -> AsyncCollection[dict[str, Any]]:
     """Shared pool of parsed workouts, keyed by source-text hash (`_id`)."""
     return get_database()["parse_cache"]
-
-
-def get_gym_cache_collection() -> AsyncCollection[dict[str, Any]]:
-    """Cached gym workouts, keyed by gym fingerprint + date (see gym_cache).
-
-    Renamed from `wodify_cache` when gyms stopped being Wodify-only. Nothing
-    migrates the old collection: it holds only derived data with a 12-hour
-    refresh interval, so the first request for a gym repopulates it and the
-    stale collection can simply be dropped.
-    """
-    return get_database()["gym_cache"]
 
 
 def get_users_collection() -> AsyncCollection[dict[str, Any]]:
@@ -95,15 +72,6 @@ def get_invites_collection() -> AsyncCollection[dict[str, Any]]:
 def get_email_tokens_collection() -> AsyncCollection[dict[str, Any]]:
     """Address-verification and password-reset tokens, keyed by token hash."""
     return get_database()["email_tokens"]
-
-
-def get_credentials_collection() -> AsyncCollection[dict[str, Any]]:
-    """Registered passkeys, keyed by the authenticator's credential id.
-
-    That id is chosen by the authenticator, not by us — it's what the browser
-    sends back to say which credential signed, so it has to be the key.
-    """
-    return get_database()["credentials"]
 
 
 def get_webauthn_challenges_collection() -> AsyncCollection[dict[str, Any]]:
@@ -159,19 +127,13 @@ async def ensure_indexes() -> None:
     # the sort should come off the index rather than a per-request sort of the
     # whole library.
     await get_workouts_collection().create_index([("owner_id", 1), ("created_at", -1)])
-    await get_wod_cache_collection().create_index("date")
-    await get_concept2_cache_collection().create_index("date")
-    # The gym feed always reads one gym's recent days, so index the pair.
-    await get_gym_cache_collection().create_index([("gym", 1), ("date", -1)])
+    # `wod_cache`'s, `concept2_cache`'s and `gym_cache`'s indexes are owned by
+    # `WodCacheEntry.Settings`/`Concept2CacheEntry.Settings`/`GymCacheEntry.Settings`.
     # parse_cache is keyed by source hash as its _id, so lookups need no index.
     # The retention sweep filters on provenance and age, though.
     await get_parse_cache_collection().create_index([("source", 1), ("created_at", 1)])
     # Spent rate-limit windows clean themselves up rather than growing forever.
     await get_rate_limit_collection().create_index("expires_at", expireAfterSeconds=0)
-    # One account per address, enforced by the index rather than by a read
-    # before the write — two registrations racing would both find it free.
-    # Sparse, so passkey-only accounts without an address don't collide.
-    await get_users_collection().create_index("email", unique=True, sparse=True)
     # "End every session for this user" is a delete by user_id, and it runs on
     # every password reset.
     await get_sessions_collection().create_index("user_id")
@@ -187,27 +149,16 @@ async def ensure_indexes() -> None:
     # Invites are *not* swept — a redeemed or expired one is worth keeping so
     # an admin can see that it was used, and by whom.
     await get_email_tokens_collection().create_index("expires_at", expireAfterSeconds=0)
-    # Every authenticated MCP call looks a token up by hash, and the settings
-    # screen lists one user's tokens.
+    # Every authenticated MCP call looks a token up by hash. `user_id` is
+    # indexed by `ApiToken.Settings`; `token_hash` isn't a model field (see
+    # auth/api_tokens.py), so it's created here instead.
     await get_api_tokens_collection().create_index("token_hash", unique=True)
-    await get_api_tokens_collection().create_index("user_id")
     # The settings screen lists one user's passkeys; authentication looks one
-    # up by its credential id, which is already the `_id`.
-    await get_credentials_collection().create_index("user_id")
+    # up by its credential id, which is already the `_id`. `user_id` is
+    # indexed by `Passkey.Settings`.
     # Challenges are spent on read and expire in code; this is the janitor for
     # the ceremonies nobody ever finishes.
     await get_webauthn_challenges_collection().create_index("expires_at", expireAfterSeconds=0)
-    # One account per address. Sparse, because the shared-passcode account has
-    # no email and two documents with a missing field would otherwise collide
-    # on a plain unique index.
-    await get_users_collection().create_index("email", unique=True, sparse=True)
-    # "End every session for this user" is a delete by user_id, and it runs on
-    # every password reset.
-    await get_sessions_collection().create_index("user_id")
-    # Expired sessions are already rejected and deleted on read (see
-    # sessions.py). This index is only the janitor for tokens nobody ever
-    # presents again — it is not the expiry check.
-    await get_sessions_collection().create_index("expires_at", expireAfterSeconds=0)
     # Every metrics question is "this type, over this window", optionally for
     # one owner — so the compound index leads with the two that always appear.
     await get_events_collection().create_index([("type", 1), ("at", -1)])

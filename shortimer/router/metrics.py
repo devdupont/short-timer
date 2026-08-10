@@ -6,28 +6,24 @@ is the shape the eventual per-plan usage meter and gym-owner view are built
 from. `/operator` answers "what is this costing and who is using it", which is
 nobody's business but the operator's.
 
-**There are no roles yet**, and the app authenticates everyone as one shared
-passcode user. Rather than pretend otherwise, `/operator` gates on an explicit
-allowlist of user ids that defaults to *empty* — so it is off until someone
-deliberately turns it on, and it keeps working unchanged the day real accounts
-arrive. A `require_session` gate alone would have handed the Anthropic bill to
-anyone who knows the passcode.
+`/operator` gates on the caller's role (`Role.STAFF`/`Role.ADMIN`), with
+`METRICS_ADMIN_USER_IDS` as a break-glass fallback for when the `users`
+collection itself is the thing that's unhealthy — see `_require_operator`.
 
 No UI consumes these yet. That's deliberate: events can't be backfilled, so the
 recording had to start now, whereas a dashboard on top of good data is cheap
 whenever it's wanted.
 """
 
-from __future__ import annotations
-
 import logging
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from shortimer.auth.session import current_owner, require_session
 from shortimer.config import get_settings
+from shortimer.errors import not_found
 from shortimer.metrics import (
     active_owners,
     event_totals,
@@ -68,6 +64,8 @@ class ParseUsage(BaseModel):
 
 
 class MeMetrics(BaseModel):
+    """What `GET /api/metrics/me` returns: one caller's own usage over `days`."""
+
     days: int
     parses: ParseUsage
     workouts_started: int = 0
@@ -78,6 +76,8 @@ class MeMetrics(BaseModel):
 
 
 class OperatorMetrics(BaseModel):
+    """What `GET /api/metrics/operator` returns: deployment-wide usage and spend over `days`."""
+
     days: int
     parses: ParseUsage
     #: Token totals per model, priced at today's rates rather than at the rate
@@ -89,6 +89,7 @@ class OperatorMetrics(BaseModel):
 
 
 def _usage(breakdown: dict[str, int]) -> ParseUsage:
+    """A raw `ParseOutcome` breakdown as the `ParseUsage` shape the endpoints return."""
     library = breakdown.get("library_hit", 0)
     pool = breakdown.get("pool_hit", 0)
     calls = breakdown.get("model_call", 0)
@@ -125,7 +126,7 @@ async def _require_operator(user: Annotated[User, Depends(current_user)]) -> str
         return user.id
     # 404 rather than 403: an endpoint the caller may not use shouldn't
     # confirm it exists, and this one names what the deployment spends.
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    not_found("Not found")
 
 
 @router.get("/me", response_model=MeMetrics)

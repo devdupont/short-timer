@@ -21,17 +21,18 @@ with, and whether a stored connection is complete enough to try, both come from
 `gym_providers`; this module owns caching, refresh scheduling and pre-parsing.
 """
 
-from __future__ import annotations
-
 import hashlib
 import logging
-from datetime import UTC, date, datetime, timedelta
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 
 from pydantic import BaseModel
 
+from shortimer.cache._feed import FeedCache
 from shortimer.cache.crypto import decrypt
-from shortimer.cache.db import get_gym_cache_collection, get_users_collection
-from shortimer.cache.parse import SOURCE_GYM, find_parse, remember_parse
+from shortimer.cache.db import get_users_collection
+from shortimer.cache.parse import SOURCE_GYM
+from shortimer.model.feed_cache import GymCacheEntry
 from shortimer.model.gym import PROVIDER_PRIORITY, GymProvider, GymWod
 from shortimer.model.user import User
 from shortimer.service.gym_providers import spec_for
@@ -47,6 +48,12 @@ MIN_REFRESH_INTERVAL = timedelta(hours=12)
 REFRESH_INTERVAL_SECONDS = 6 * 60 * 60
 
 
+class _Cache(FeedCache[GymCacheEntry]):
+    """`FeedCache` bound to `GymCacheEntry`."""
+
+    document_model = GymCacheEntry
+
+
 def gym_fingerprint(credential: str, provider: GymProvider) -> str:
     """A stable, non-reversible id for the gym behind a credential.
 
@@ -58,71 +65,55 @@ def gym_fingerprint(credential: str, provider: GymProvider) -> str:
     return digest[:32]
 
 
-def _document_id(fingerprint: str, day: date) -> str:
-    return f"{fingerprint}:{day.isoformat()}"
-
-
-def _to_document(wod: GymWod, fingerprint: str) -> dict[str, object]:
-    return {
-        "_id": _document_id(fingerprint, wod.date),
-        "gym": fingerprint,
-        "date": wod.date.isoformat(),
-        "title": wod.title,
-        "text": wod.text,
-        "url": wod.url,
-        "provider": wod.provider.value,
-        "fetched_at": datetime.now(UTC),
-    }
-
-
-def _from_document(doc: dict[str, object]) -> GymWod:
+def _to_wod(entry: GymCacheEntry) -> GymWod:
+    """A cached row as the `GymWod` shape callers work with."""
     return GymWod(
-        date=date.fromisoformat(str(doc["date"])),
-        title=str(doc["title"]),
-        text=str(doc["text"]),
-        url=str(doc.get("url") or ""),
-        provider=GymProvider(str(doc["provider"])),
+        date=entry.date, title=entry.title, text=entry.text, url=entry.url, provider=entry.provider
     )
 
 
 async def last_refreshed_at(fingerprint: str) -> datetime | None:
-    doc = await get_gym_cache_collection().find_one({"gym": fingerprint}, sort=[("fetched_at", -1)])
-    if doc is None:
-        return None
-    fetched = doc.get("fetched_at")
-    if not isinstance(fetched, datetime):
-        return None
-    return fetched if fetched.tzinfo else fetched.replace(tzinfo=UTC)
+    """When this gym's cache was most recently written, if ever."""
+    return await _Cache.last_refreshed_at({"gym": fingerprint})
 
 
 async def read_cached(fingerprint: str, days: int) -> list[GymWod]:
     """Most recent `days` cached workouts for one gym, newest first."""
-    cursor = get_gym_cache_collection().find({"gym": fingerprint}).sort("date", -1).limit(days)
-    return [_from_document(doc) async for doc in cursor]
+    cursor = GymCacheEntry.find(GymCacheEntry.gym == fingerprint).sort("-date").limit(days)
+    return [_to_wod(entry) async for entry in cursor]
 
 
 async def _store(wods: list[GymWod], fingerprint: str) -> int:
-    collection = get_gym_cache_collection()
+    """Upsert `wods` for `fingerprint`. Returns how many were written."""
     for wod in wods:
-        document = _to_document(wod, fingerprint)
-        await collection.replace_one({"_id": document["_id"]}, document, upsert=True)
+        await GymCacheEntry(
+            id=f"{fingerprint}:{wod.date.isoformat()}",
+            gym=fingerprint,
+            date=wod.date,
+            title=wod.title,
+            text=wod.text,
+            url=wod.url,
+            provider=wod.provider,
+        ).save()
     return len(wods)
 
 
 # --- Resolving a user's configuration into a fetch ---------------------------
 
 
+@dataclass
 class GymSource:
     """A user's configured gym, resolved and ready to fetch."""
 
-    def __init__(
-        self, *, provider: GymProvider, credential: str, location: str, program: str
-    ) -> None:
-        self.provider = provider
-        self.credential = credential
-        self.location = location
-        self.program = program
-        self.fingerprint = gym_fingerprint(credential, provider)
+    provider: GymProvider
+    credential: str
+    location: str
+    program: str
+    fingerprint: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        """Derive `fingerprint` from the credential and provider."""
+        self.fingerprint = gym_fingerprint(self.credential, self.provider)
 
 
 def resolve_source(user: User) -> GymSource | None:
@@ -153,6 +144,7 @@ def resolve_source(user: User) -> GymSource | None:
 
 
 async def _fetch(source: GymSource, days: int) -> list[GymWod]:
+    """Dispatch to the provider spec for `source` and fetch `days` of workouts."""
     return await spec_for(source.provider).fetch(
         days,
         credential=source.credential,
@@ -167,10 +159,8 @@ async def refresh(source: GymSource, *, force: bool = False) -> int:
     A failed fetch leaves the existing cache alone, so an unreachable platform
     degrades to stale data rather than an empty feed.
     """
-    if not force:
-        last = await last_refreshed_at(source.fingerprint)
-        if last is not None and datetime.now(UTC) - last < MIN_REFRESH_INTERVAL:
-            return 0
+    if not force and await _Cache.is_fresh(MIN_REFRESH_INTERVAL, {"gym": source.fingerprint}):
+        return 0
 
     wods = await _fetch(source, CACHE_DAYS)
     if not wods:
@@ -194,21 +184,18 @@ async def ensure_parsed(fingerprint: str, limit: int = CACHE_DAYS) -> int:
     by many of its members, and parsing is per-owner, so doing it here means
     one model call per workout instead of one per member.
     """
-    parsed = 0
-    cursor = get_gym_cache_collection().find({"gym": fingerprint}).sort("date", -1).limit(limit)
-    async for doc in cursor:
-        text = str(doc.get("text") or "")
-        if not text or await find_parse(text) is not None:
-            continue
-        title = str(doc.get("title") or "") or None
-        try:
-            workout = await parse_workout_text(text, name_hint=title, purpose="prewarm:gym")
-        except Exception:  # one bad day shouldn't stop the rest
-            logger.exception("Could not pre-parse gym day %s", doc.get("date"))
-            continue
-        await remember_parse(workout, source=SOURCE_GYM)
-        parsed += 1
-
+    cursor = GymCacheEntry.find(GymCacheEntry.gym == fingerprint).sort("-date").limit(limit)
+    candidates = [(entry.text, entry.title or None) async for entry in cursor]
+    # A gym's programming stays on the ordinary user-retention clock even when
+    # a member pastes it first — unlike crossfit.com/Concept2/Hybrid, it isn't
+    # a source everyone shares, so a match here is never promoted permanent.
+    parsed = await _Cache.warm_parse_pool(
+        candidates,
+        parse=parse_workout_text,
+        source=SOURCE_GYM,
+        purpose="prewarm:gym",
+        promote_existing=False,
+    )
     if parsed:
         logger.info("Pre-parsed %d gym workout(s).", parsed)
     return parsed
@@ -245,7 +232,6 @@ class ConnectionHealth(BaseModel):
 
 async def connection_health(user: User) -> list[ConnectionHealth]:
     """Fetch health for every connection the user has stored a credential for."""
-    collection = get_gym_cache_collection()
     health: list[ConnectionHealth] = []
     for connection in user.config.gyms:
         if connection.credential is None:
@@ -262,7 +248,7 @@ async def connection_health(user: User) -> list[ConnectionHealth]:
             ConnectionHealth(
                 provider=connection.provider,
                 last_fetched_at=await last_refreshed_at(fingerprint),
-                cached_days=await collection.count_documents({"gym": fingerprint}),
+                cached_days=await GymCacheEntry.find(GymCacheEntry.gym == fingerprint).count(),
             )
         )
     return health

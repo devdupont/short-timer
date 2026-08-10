@@ -1,3 +1,5 @@
+"""Argon2id password hashing: verification, cost parameters, and rehash-on-login."""
+
 from argon2 import PasswordHasher
 
 from shortimer.auth import passwords
@@ -5,11 +7,13 @@ from shortimer.auth.passwords import hash_password, needs_rehash, verify_passwor
 
 
 def test_hash_then_verify() -> None:
+    """A password verifies against its own hash."""
     stored = hash_password("correct horse battery staple")
     assert verify_password(stored, "correct horse battery staple") is True
 
 
 def test_wrong_password_does_not_verify() -> None:
+    """A hash rejects even a one-character-different (case) password."""
     stored = hash_password("correct horse battery staple")
     assert verify_password(stored, "Correct horse battery staple") is False
 
@@ -20,6 +24,7 @@ def test_hash_is_salted() -> None:
 
 
 def test_hash_does_not_contain_the_password() -> None:
+    """The stored PHC string never contains the plaintext password as a substring."""
     assert "hunter2" not in hash_password("hunter2")
 
 
@@ -49,6 +54,7 @@ def test_garbage_stored_hash_is_a_mismatch_not_a_crash() -> None:
 
 
 def test_needs_rehash_is_false_for_a_current_hash() -> None:
+    """A hash produced under current parameters doesn't need re-hashing."""
     assert needs_rehash(hash_password("whatever")) is False
 
 
@@ -59,6 +65,7 @@ def test_needs_rehash_is_true_for_a_weaker_hash() -> None:
 
 
 def test_needs_rehash_tolerates_a_garbage_hash() -> None:
+    """A malformed stored hash reports as not-needing-rehash rather than raising."""
     assert needs_rehash("not-a-real-hash") is False
 
 

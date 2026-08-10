@@ -18,15 +18,10 @@ creation. Scopes are checked per tool so a read-only integration can be exactly
 that.
 """
 
-from __future__ import annotations
-
 import logging
-import uuid
 from datetime import UTC, datetime
-from typing import Any
 
 from shortimer.auth.tokens import hash_token, new_token, token_prefix
-from shortimer.cache.db import get_api_tokens_collection
 from shortimer.model.token import ApiToken, ApiTokenScope
 
 logger = logging.getLogger(__name__)
@@ -37,36 +32,27 @@ logger = logging.getLogger(__name__)
 _PREFIX = "st_"
 
 
-def _from_document(doc: dict[str, Any]) -> ApiToken:
-    data = dict(doc)
-    data["id"] = data.pop("_id")
-    data.pop("token_hash", None)
-    return ApiToken(**data)
-
-
 async def create_token(
     *, user_id: str, name: str, scopes: list[ApiTokenScope]
 ) -> tuple[str, ApiToken]:
     """Mint a token. Returns the raw value and the record describing it.
 
     The raw value is unrecoverable afterwards, so the caller's response is the
-    only chance to show it.
+    only chance to show it. `token_hash` is written in a second step, straight
+    to the collection, because it deliberately isn't a field on `ApiToken` —
+    see the model's docstring.
     """
     raw = f"{_PREFIX}{new_token()}"
     token = ApiToken(
-        id=uuid.uuid4().hex,
         user_id=user_id,
         name=name.strip() or "Unnamed token",
         scopes=scopes,
         prefix=token_prefix(raw, len(_PREFIX) + 6),
-        created_at=datetime.now(UTC),
     )
-
-    document = token.model_dump(mode="json")
-    document["_id"] = document.pop("id")
-    document["token_hash"] = hash_token(raw)
-    document["created_at"] = token.created_at
-    await get_api_tokens_collection().insert_one(document)
+    await token.insert()
+    await ApiToken.get_pymongo_collection().update_one(
+        {"_id": token.id}, {"$set": {"token_hash": hash_token(raw)}}
+    )
     logger.info("Issued API token %s for %s.", token.id, user_id)
     return raw, token
 
@@ -78,14 +64,14 @@ async def resolve_token(raw: str) -> ApiToken | None:
     which of four tokens is safe to revoke, and failing the *call* because the
     bookkeeping write failed would be the wrong trade.
     """
-    doc = await get_api_tokens_collection().find_one({"token_hash": hash_token(raw)})
+    doc = await ApiToken.get_pymongo_collection().find_one({"token_hash": hash_token(raw)})
     if doc is None:
         return None
 
-    token = _from_document(doc)
+    token: ApiToken = ApiToken.model_validate({**doc, "id": doc["_id"]})
     try:
-        await get_api_tokens_collection().update_one(
-            {"_id": token.id}, {"$set": {"last_used_at": datetime.now(UTC)}}
+        await ApiToken.find_one(ApiToken.id == token.id).update(
+            {"$set": {"last_used_at": datetime.now(UTC)}}
         )
     except Exception:
         logger.warning("Could not record use of API token %s.", token.id)
@@ -93,8 +79,8 @@ async def resolve_token(raw: str) -> ApiToken | None:
 
 
 async def list_tokens(user_id: str) -> list[ApiToken]:
-    cursor = get_api_tokens_collection().find({"user_id": user_id}).sort("created_at", -1)
-    return [_from_document(doc) async for doc in cursor]
+    """A user's issued tokens, newest first."""
+    return await ApiToken.find(ApiToken.user_id == user_id).sort("-created_at").to_list()
 
 
 async def revoke_token(user_id: str, token_id: str) -> bool:
@@ -104,5 +90,5 @@ async def revoke_token(user_id: str, token_id: str) -> bool:
     so there's no path where a mistake reads one user's token id and deletes
     another's.
     """
-    result = await get_api_tokens_collection().delete_one({"_id": token_id, "user_id": user_id})
-    return result.deleted_count == 1
+    result = await ApiToken.find_one(ApiToken.id == token_id, ApiToken.user_id == user_id).delete()
+    return result is not None and result.deleted_count == 1

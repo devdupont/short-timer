@@ -15,8 +15,6 @@ settings screen renders whatever it's given — so adding a provider is a change
 to this file plus a client module, and no frontend change at all.
 """
 
-from __future__ import annotations
-
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
@@ -90,6 +88,7 @@ class GymProviderSpec:
 async def _fetch_wodify_member(
     days: int, *, credential: str, location: str, program: str
 ) -> list[GymWod]:
+    """`Fetcher` for `GymProvider.WODIFY_MEMBER`."""
     return await wodify.fetch_recent_member_wods(
         days, whiteboard_key=credential, location=location, program=program
     )
@@ -98,6 +97,7 @@ async def _fetch_wodify_member(
 async def _fetch_wodify_owner(
     days: int, *, credential: str, location: str, program: str
 ) -> list[GymWod]:
+    """`Fetcher` for `GymProvider.WODIFY_OWNER`."""
     return await wodify.fetch_recent_owner_wods(
         days, api_key=credential, location=location, program=program
     )
@@ -106,6 +106,7 @@ async def _fetch_wodify_owner(
 async def _fetch_sugarwod_owner(
     days: int, *, credential: str, location: str, program: str
 ) -> list[GymWod]:
+    """`Fetcher` for `GymProvider.SUGARWOD_OWNER`."""
     # SugarWOD scopes by track, not by location — a gym with two sites still
     # has one programming calendar — so `location` is not declared and not read.
     return await sugarwod.fetch_recent_owner_wods(days, api_key=credential, track_id=program)
@@ -178,6 +179,7 @@ PROVIDERS: dict[GymProvider, GymProviderSpec] = {
 
 
 def spec_for(provider: GymProvider) -> GymProviderSpec:
+    """The registered `GymProviderSpec` for `provider`."""
     return PROVIDERS[provider]
 
 

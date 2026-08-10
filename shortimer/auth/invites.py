@@ -16,28 +16,19 @@ deleted: an admin screen wants to show that an invite was used and by whom,
 which is exactly the information deletion would throw away.
 """
 
-from __future__ import annotations
-
 import logging
-import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any
+
+from pymongo.results import UpdateResult
 
 from shortimer.auth.tokens import hash_token, new_token
-from shortimer.cache.db import get_invites_collection
 from shortimer.config import get_settings
 from shortimer.model.register import Invite
 from shortimer.model.status import Role
 from shortimer.users import normalize_email
+from shortimer.util.time import is_expired
 
 logger = logging.getLogger(__name__)
-
-
-def _from_document(doc: dict[str, Any]) -> Invite:
-    data = dict(doc)
-    data["id"] = data.pop("_id")
-    data.pop("token_hash", None)
-    return Invite(**data)
 
 
 async def create_invite(
@@ -47,34 +38,30 @@ async def create_invite(
 
     The token is returned exactly once — it's stored hashed, so it cannot be
     shown again later, which is why the admin API has to surface it at the
-    moment of creation.
+    moment of creation. `token_hash` is written in a second step, straight to
+    the collection, because it deliberately isn't a field on `Invite` — see
+    the model's docstring.
     """
     now = datetime.now(UTC)
     token = new_token()
     invite = Invite(
-        id=uuid.uuid4().hex,
         email=normalize_email(email) if email else None,
         role=role,
         created_by=created_by,
         created_at=now,
         expires_at=now + timedelta(hours=get_settings().invite_ttl_hours),
     )
-
-    document = invite.model_dump(mode="json")
-    document["_id"] = document.pop("id")
-    document["token_hash"] = hash_token(token)
-    # Stored as real dates so the values stay comparable in a query, unlike
-    # the ISO strings `model_dump(mode="json")` produces.
-    document["created_at"] = invite.created_at
-    document["expires_at"] = invite.expires_at
-    await get_invites_collection().insert_one(document)
+    await invite.insert()
+    await Invite.get_pymongo_collection().update_one(
+        {"_id": invite.id}, {"$set": {"token_hash": hash_token(token)}}
+    )
     return token, invite
 
 
 async def find_invite(token: str) -> Invite | None:
     """The invite a token names, valid or not. Callers decide what to do."""
-    doc = await get_invites_collection().find_one({"token_hash": hash_token(token)})
-    return _from_document(doc) if doc is not None else None
+    doc = await Invite.get_pymongo_collection().find_one({"token_hash": hash_token(token)})
+    return Invite.model_validate({**doc, "id": doc["_id"]}) if doc is not None else None
 
 
 def invite_error(invite: Invite | None, email: str) -> str | None:
@@ -88,10 +75,7 @@ def invite_error(invite: Invite | None, email: str) -> str | None:
         return "This invite link is not valid."
     if invite.redeemed_at is not None:
         return "This invite has already been used."
-    expires_at = invite.expires_at
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=UTC)
-    if datetime.now(UTC) >= expires_at:
+    if is_expired(invite.expires_at):
         return "This invite has expired."
     if invite.email is not None and invite.email != normalize_email(email):
         # Names the bound address deliberately: the holder of this token was
@@ -108,17 +92,15 @@ async def mark_redeemed(invite_id: str, user_id: str) -> bool:
     registrations racing on the same token: the update matches at most once,
     and the loser is told the invite is used.
     """
-    result = await get_invites_collection().update_one(
-        {"_id": invite_id, "redeemed_at": None},
-        {"$set": {"redeemed_at": datetime.now(UTC), "redeemed_by": user_id}},
+    result = await Invite.find_one(Invite.id == invite_id, Invite.redeemed_at == None).update(  # noqa: E711
+        {"$set": {"redeemed_at": datetime.now(UTC), "redeemed_by": user_id}}
     )
-    return result.modified_count == 1
+    return isinstance(result, UpdateResult) and result.modified_count == 1
 
 
 async def list_invites(*, limit: int = 100) -> list[Invite]:
     """Every invite, newest first, for the admin screen."""
-    cursor = get_invites_collection().find({}).sort("created_at", -1).limit(limit)
-    return [_from_document(doc) async for doc in cursor]
+    return await Invite.find().sort("-created_at").limit(limit).to_list()
 
 
 async def revoke_invite(invite_id: str) -> bool:
@@ -127,5 +109,5 @@ async def revoke_invite(invite_id: str) -> bool:
     A redeemed invite is left alone: it's now a record of how an account came
     to exist, and deleting it would lose that.
     """
-    result = await get_invites_collection().delete_one({"_id": invite_id, "redeemed_at": None})
-    return result.deleted_count == 1
+    result = await Invite.find_one(Invite.id == invite_id, Invite.redeemed_at == None).delete()  # noqa: E711
+    return result is not None and result.deleted_count == 1

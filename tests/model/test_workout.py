@@ -1,3 +1,5 @@
+"""`Workout` and its building blocks: id generation and round-tripping through JSON."""
+
 from shortimer.model.workout import (
     IntervalClock,
     Movement,
@@ -8,12 +10,14 @@ from shortimer.model.workout import (
 
 
 def test_workout_gets_a_generated_id() -> None:
+    """A `Workout` built with no id gets one for free, and starts with no segments."""
     workout = Workout(name="Fran", mode=WorkoutMode.FOR_TIME)
     assert workout.id
     assert workout.segments == []
 
 
 def test_nested_segment_rounds_survive_round_trip() -> None:
+    """Murph's inner partition (rounds plus three movements) survives a dump/reload cycle."""
     workout = Workout(
         name="Murph",
         mode=WorkoutMode.FOR_TIME,
@@ -70,6 +74,7 @@ def test_a_segment_that_only_says_rest_is_a_rest_leg() -> None:
 
 
 def test_work_is_never_reinterpreted_as_rest() -> None:
+    """Real work, a rest-labelled segment with real movements, and an empty segment: none flag as rest."""
     assert not WorkoutSegment(movements=[Movement(name="Row", calories=16)]).is_rest
     # A named movement wins over a label — "rest round" still has rows in it.
     assert not WorkoutSegment(label="Rest", movements=[Movement(name="Renegade Row")]).is_rest
@@ -131,3 +136,9 @@ def test_counting_up_survives_a_round_trip() -> None:
     # Direction is all that changes — the legs the clock runs are untouched.
     assert restored.rounds == 5
     assert restored.work_seconds == 180
+
+
+def test_seeded_workout_model_still_round_trips() -> None:
+    """Guard the tightened request model against over-restricting real data."""
+    workout = Workout(name="Fran", mode=WorkoutMode.FOR_TIME, source_text="21-15-9")
+    assert workout.source_text == "21-15-9"

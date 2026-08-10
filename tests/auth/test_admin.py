@@ -19,6 +19,7 @@ POSTMARK = "https://api.postmarkapp.com/email"
 
 
 async def test_admin_routes_need_a_session(client: AsyncClient) -> None:
+    """An unauthenticated request to an admin route is rejected."""
     assert (await client.get("/api/admin/invites")).status_code == 401
 
 
@@ -38,6 +39,7 @@ async def test_staff_cannot_administer_accounts(authed_client: AsyncClient, acco
 
 
 async def test_an_admin_can_reach_them(admin_client: AsyncClient) -> None:
+    """The admin role clears the gate the other two tests hit."""
     assert (await admin_client.get("/api/admin/invites")).status_code == 200
 
 
@@ -61,17 +63,20 @@ async def test_creating_an_invite_returns_the_token_exactly_once(
 
 
 async def test_an_open_invite_has_no_address(admin_client: AsyncClient) -> None:
+    """An invite created with no email is unbound and reports no email sent."""
     body = (await admin_client.post("/api/admin/invites", json={})).json()
     assert body["invite"]["email"] is None
     assert body["emailed"] is False
 
 
 async def test_an_invite_can_name_a_role(admin_client: AsyncClient) -> None:
+    """A `role` passed at creation carries through to the redeemed account."""
     body = (await admin_client.post("/api/admin/invites", json={"role": "staff"})).json()
     assert body["invite"]["role"] == "staff"
 
 
 async def test_invite_addresses_are_normalised(admin_client: AsyncClient) -> None:
+    """A mixed-case address is stored lowercased."""
     body = (
         await admin_client.post("/api/admin/invites", json={"email": "Mixed@Example.COM"})
     ).json()
@@ -84,6 +89,7 @@ async def test_invite_addresses_are_normalised(admin_client: AsyncClient) -> Non
 async def test_revoking_an_unused_invite_removes_it(
     admin_client: AsyncClient, admin_account: User
 ) -> None:
+    """Revoking an invite nobody has redeemed deletes it outright."""
     token, invite = await invites.create_invite(created_by=admin_account.id)
 
     assert (await admin_client.delete(f"/api/admin/invites/{invite.id}")).status_code == 204
@@ -93,6 +99,7 @@ async def test_revoking_an_unused_invite_removes_it(
 async def test_a_redeemed_invite_is_kept_as_a_record(
     admin_client: AsyncClient, admin_account: User
 ) -> None:
+    """A redeemed invite refuses revocation and is listed with its redemption stamped."""
     token, invite = await invites.create_invite(created_by=admin_account.id)
 
     # A separate client, so redeeming doesn't replace the admin's session
@@ -117,6 +124,7 @@ async def test_a_redeemed_invite_is_kept_as_a_record(
 
 
 async def test_revoking_an_unknown_invite_is_404(admin_client: AsyncClient) -> None:
+    """Revoking an id that doesn't exist reports 404."""
     assert (await admin_client.delete("/api/admin/invites/nope")).status_code == 404
 
 
@@ -126,6 +134,7 @@ async def test_revoking_an_unknown_invite_is_404(admin_client: AsyncClient) -> N
 async def test_the_user_list_never_carries_a_password_hash(
     admin_client: AsyncClient, account: User
 ) -> None:
+    """The admin user list reports whether a password is set, never the hash itself."""
     response = await admin_client.get("/api/admin/users")
     assert response.status_code == 200
     assert "password_hash" not in response.text
@@ -143,6 +152,7 @@ async def test_the_user_list_never_carries_a_password_hash(
 async def test_an_addressed_invite_is_emailed(
     admin_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """An invite with an address, sent with email on, posts to Postmark and reports `emailed`."""
     monkeypatch.setenv("EMAIL_ENABLED", "true")
     monkeypatch.setenv("POSTMARK_SERVER_TOKEN", "test-token")
     get_settings.cache_clear()

@@ -1,16 +1,23 @@
-""""""
+"""A registered WebAuthn credential, and the request/response shapes around it."""
 
-from datetime import UTC, datetime
-from typing import Any
+from datetime import datetime
+from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field
+from pymongo import IndexModel
+
+from shortimer.model.base import MongoDocument
+from shortimer.util.time import utcnow
 
 
-class Passkey(BaseModel):
-    """A registered WebAuthn credential. The public key isn't part of this shape.
+class Passkey(MongoDocument):
+    """A registered WebAuthn credential.
 
-    `id` is the base64url credential id the authenticator produced — not one we
-    chose, because it's what the browser sends back to identify the credential.
+    `id` is the base64url credential id the authenticator produced — not one
+    we chose, because it's what the browser sends back to identify the
+    credential. The public key is deliberately not a field here — see
+    `auth/passkeys.py` — so returning this model directly as a response (see
+    `router/me.py`) can never leak it.
     """
 
     id: str
@@ -24,8 +31,16 @@ class Passkey(BaseModel):
     #: passkey is lost with the device, which is what makes "register a second
     #: one" concrete advice rather than nagging.
     backed_up: bool = False
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = Field(default_factory=utcnow)
     last_used_at: datetime | None = None
+
+    class Settings:
+        """Beanie collection name and indexes."""
+
+        name = "credentials"
+        indexes: ClassVar[list[IndexModel]] = [
+            IndexModel([("user_id", 1)]),
+        ]
 
 
 class PasskeyRegisterRequest(BaseModel):

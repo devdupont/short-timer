@@ -1,6 +1,6 @@
 """The gym feed end to end: config resolution, caching, and the API."""
 
-from collections.abc import Awaitable, Callable, Generator
+from collections.abc import Awaitable, Callable
 
 import httpx
 import pytest
@@ -9,11 +9,7 @@ from httpx import AsyncClient
 
 from shortimer.cache import crypto
 from shortimer.cache.crypto import encrypt, generate_key
-from shortimer.cache.db import (
-    get_gym_cache_collection,
-    get_users_collection,
-    get_workouts_collection,
-)
+from shortimer.cache.db import get_users_collection, get_workouts_collection
 from shortimer.cache.gym import (
     gym_fingerprint,
     read_cached,
@@ -21,6 +17,7 @@ from shortimer.cache.gym import (
     resolve_source,
 )
 from shortimer.config import get_settings
+from shortimer.model.feed_cache import GymCacheEntry
 from shortimer.model.gym import GymProvider
 from shortimer.model.user import User
 from shortimer.model.workout import Workout, WorkoutMode
@@ -36,15 +33,8 @@ BOARD_HTML = """
 </div></body></html>
 """
 
-
-@pytest.fixture(autouse=True)
-def _secrets_configured(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
-    monkeypatch.setenv("SECRETS_KEYS", generate_key())
-    get_settings.cache_clear()
-    crypto._cipher.cache_clear()
-    yield
-    get_settings.cache_clear()
-    crypto._cipher.cache_clear()
+#: Every gym connection stores a credential, so the whole file needs an encryption key.
+pytestmark = pytest.mark.usefixtures("secrets_configured")
 
 
 @pytest.fixture(autouse=True)
@@ -54,6 +44,7 @@ def _no_real_llm(monkeypatch: pytest.MonkeyPatch) -> None:
     from shortimer.model.workout import Workout, WorkoutMode
 
     async def fake_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
+        """A fake parser that avoids a real model call for the automatic pre-parse."""
         return Workout(name=name_hint or "Parsed", mode=WorkoutMode.FOR_TIME, source_text=text)
 
     monkeypatch.setattr(gym, "parse_workout_text", fake_parse)
@@ -78,6 +69,7 @@ async def _configure(
 
 
 async def _configure_member(user_id: str, key: str = "wb-key-1234") -> None:
+    """Store a Wodify member (public whiteboard) connection for `user_id`."""
     await _configure(GymProvider.WODIFY_MEMBER, user_id=user_id, key=key)
 
 
@@ -85,6 +77,7 @@ async def _configure_member(user_id: str, key: str = "wb-key-1234") -> None:
 
 
 async def test_unconfigured_user_resolves_to_nothing(account: User) -> None:
+    """A user with no gym connections at all resolves to no source."""
     user = await get_user(account.id)
     assert user is not None
     assert resolve_source(user) is None
@@ -150,10 +143,12 @@ async def test_credential_that_cannot_be_decrypted_resolves_to_nothing(
 
 
 async def test_gym_feed_requires_auth(client: AsyncClient) -> None:
+    """An unauthenticated request to the gym feed is rejected."""
     assert (await client.get("/api/gym/wods")).status_code == 401
 
 
 async def test_unconfigured_feed_is_empty_not_an_error(authed_client: AsyncClient) -> None:
+    """A caller with no gym configured gets an empty feed with `configured=False`, not an error."""
     response = await authed_client.get("/api/gym/wods")
     assert response.status_code == 200
     assert response.json() == {"configured": False, "wods": []}
@@ -161,6 +156,7 @@ async def test_unconfigured_feed_is_empty_not_an_error(authed_client: AsyncClien
 
 @respx.mock
 async def test_configured_feed_returns_workouts(authed_client: AsyncClient, account: User) -> None:
+    """A configured gym returns the requested number of days, fetched fresh on a cold cache."""
     respx.get(WHITEBOARD).mock(return_value=httpx.Response(200, html=BOARD_HTML))
     await _configure_member(account.id)
 
@@ -177,6 +173,7 @@ async def test_configured_feed_returns_workouts(authed_client: AsyncClient, acco
 async def test_feed_marks_workouts_already_in_the_library(
     authed_client: AsyncClient, account: User
 ) -> None:
+    """A gym day whose text matches a workout already saved reports its saved id."""
     respx.get(WHITEBOARD).mock(return_value=httpx.Response(200, html=BOARD_HTML))
     await _configure_member(account.id)
 
@@ -258,16 +255,18 @@ async def test_members_of_the_same_gym_share_one_fetch(account: User) -> None:
 
 @respx.mock
 async def test_stored_cache_holds_no_credential(account: User) -> None:
+    """The cached rows never carry the plaintext credential used to fetch them."""
     respx.get(WHITEBOARD).mock(return_value=httpx.Response(200, html=BOARD_HTML))
     await _configure_member(account.id, key="very-secret-key")
     await refresh_all_configured()
 
-    async for doc in get_gym_cache_collection().find({}):
-        assert "very-secret-key" not in str(doc)
+    async for entry in GymCacheEntry.find_all():
+        assert "very-secret-key" not in str(entry.model_dump())
 
 
 @respx.mock
 async def test_refresh_skips_users_without_a_gym() -> None:
+    """With no gyms configured anywhere, the sweep refreshes nothing."""
     respx.get(WHITEBOARD).mock(return_value=httpx.Response(200, html=BOARD_HTML))
     assert await refresh_all_configured() == 0
 
@@ -304,6 +303,7 @@ async def test_providers_endpoint_describes_every_platform(authed_client: AsyncC
 
 
 async def test_providers_endpoint_requires_a_session(client: AsyncClient) -> None:
+    """An unauthenticated request to the provider registry is rejected."""
     assert (await client.get("/api/gym/providers")).status_code == 401
 
 
@@ -324,6 +324,7 @@ async def test_health_reports_a_connection_that_has_never_fetched(
 async def test_health_reports_a_working_connection(
     authed_client: AsyncClient, account: User
 ) -> None:
+    """A connection that has successfully fetched reports a timestamp and cached days."""
     respx.get(WHITEBOARD).mock(return_value=httpx.Response(200, html=BOARD_HTML))
     await _configure_member(account.id)
     await authed_client.get("/api/gym/wods?days=2")
@@ -334,6 +335,7 @@ async def test_health_reports_a_working_connection(
 
 
 async def test_health_is_empty_when_nothing_is_connected(authed_client: AsyncClient) -> None:
+    """A caller with no gym connections at all gets an empty health list."""
     assert (await authed_client.get("/api/gym/health")).json() == []
 
 

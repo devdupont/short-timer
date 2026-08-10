@@ -21,8 +21,6 @@ surprise. A day that's missing or fails upstream is skipped rather than raised:
 one bad day shouldn't empty the feed.
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 from datetime import date, datetime, timedelta
@@ -112,6 +110,7 @@ def _error_message(response: httpx.Response) -> str:
 
 
 def _default_title(day: date) -> str:
+    """A fallback title when SugarWOD doesn't supply one."""
     return day.strftime("%A %y%m%d")
 
 

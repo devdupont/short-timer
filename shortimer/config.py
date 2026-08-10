@@ -9,6 +9,8 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    """Everything configurable about a deployment, read once from the environment."""
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     session_cookie_secure: bool = Field(
@@ -160,13 +162,14 @@ class Settings(BaseSettings):
     #: compare a month against the same month last year, which is the longest
     #: comparison anyone actually makes here.
     events_retention_days: int = 400
-    #: Who may read the *operator* metrics — global spend and other users'
-    #: activity. Empty means nobody, which is the right default: there are no
-    #: roles yet, and a shared passcode would otherwise hand every visitor the
-    #: Anthropic bill. Same NoDecode treatment as cors_origins.
+    #: Break-glass allowlist for the operator metrics, alongside the `staff`/
+    #: `admin` role check — see `router/metrics.py`'s `_require_operator`. Stays
+    #: useful when the `users` collection is itself the thing that's down. Same
+    #: NoDecode treatment as cors_origins.
     metrics_admin_user_ids: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
 
 @lru_cache
 def get_settings() -> Settings:
+    """The process-wide `Settings`, parsed once and cached."""
     return Settings()

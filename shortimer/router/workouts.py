@@ -1,3 +1,5 @@
+"""The workout library: parsing pasted text, saving, searching, paging, and lifecycle events."""
+
 import re
 import uuid
 from typing import Any
@@ -8,6 +10,7 @@ from shortimer.auth.session import current_owner, require_session
 from shortimer.cache.db import get_workouts_collection
 from shortimer.cache.parse import find_parse, remember_parse
 from shortimer.data.benchmarks import benchmark_workouts
+from shortimer.errors import not_found
 from shortimer.metrics import (
     record_parse,
     record_workout_completed,
@@ -110,6 +113,7 @@ def _library_filter(
 
 
 def _to_document(workout: Workout, owner_id: str) -> dict[str, Any]:
+    """`workout` as a Mongo document, with server-assigned `_id`, `source_hash`, and `owner_id`."""
     doc = workout.model_dump(mode="json")
     doc["_id"] = doc.pop("id")
     # Derive the dedup hash from source_text at write time so it's always
@@ -121,6 +125,7 @@ def _to_document(workout: Workout, owner_id: str) -> dict[str, Any]:
 
 
 def _from_document(doc: dict[str, Any]) -> Workout:
+    """A Mongo document as the `Workout` shape callers work with."""
     doc = dict(doc)
     doc["id"] = doc.pop("_id")
     return Workout(**doc)
@@ -226,6 +231,7 @@ async def seed_benchmarks(owner_id: str = Depends(writes_allowed)) -> SeedRespon
 async def create_workout(
     body: WorkoutCreateRequest, owner_id: str = Depends(writes_allowed)
 ) -> Workout:
+    """Save a client-built workout, or return the existing one if its text is already saved."""
     collection = get_workouts_collection()
     # Upsert by source text: if this workout was already saved (same text),
     # return the existing record instead of creating a duplicate.
@@ -303,7 +309,7 @@ async def mark_started(workout_id: str, owner_id: str = Depends(current_owner)) 
         {"_id": workout_id, "owner_id": owner_id}, {"mode": 1}
     )
     if doc is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workout not found")
+        not_found("Workout not found")
     await record_workout_started(
         owner_id=owner_id, workout_id=workout_id, mode=str(doc.get("mode") or "")
     )
@@ -331,7 +337,7 @@ async def mark_completed(
         {"_id": workout_id, "owner_id": owner_id}, {"mode": 1}
     )
     if doc is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workout not found")
+        not_found("Workout not found")
     await record_workout_completed(
         owner_id=owner_id,
         workout_id=workout_id,
@@ -342,10 +348,11 @@ async def mark_completed(
 
 @router.get("/{workout_id}", response_model=Workout)
 async def get_workout(workout_id: str, owner_id: str = Depends(current_owner)) -> Workout:
+    """One of the caller's own saved workouts, by id."""
     collection = get_workouts_collection()
     doc = await collection.find_one({"_id": workout_id, "owner_id": owner_id})
     if doc is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workout not found")
+        not_found("Workout not found")
     return _from_document(doc)
 
 
@@ -353,19 +360,21 @@ async def get_workout(workout_id: str, owner_id: str = Depends(current_owner)) -
 async def update_workout(
     workout_id: str, body: WorkoutCreateRequest, owner_id: str = Depends(writes_allowed)
 ) -> Workout:
+    """Replace one of the caller's own saved workouts wholesale."""
     collection = get_workouts_collection()
     workout = body.workout.model_copy(update={"id": workout_id})
     result = await collection.replace_one(
         {"_id": workout_id, "owner_id": owner_id}, _to_document(workout, owner_id)
     )
     if result.matched_count == 0:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workout not found")
+        not_found("Workout not found")
     return workout
 
 
 @router.delete("/{workout_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_workout(workout_id: str, owner_id: str = Depends(writes_allowed)) -> None:
+    """Delete one of the caller's own saved workouts."""
     collection = get_workouts_collection()
     result = await collection.delete_one({"_id": workout_id, "owner_id": owner_id})
     if result.deleted_count == 0:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workout not found")
+        not_found("Workout not found")

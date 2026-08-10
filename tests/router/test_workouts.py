@@ -1,9 +1,17 @@
+"""The workout library API: CRUD, parse-and-save, dedup, owner scoping, paging, search, filters,
+and hardening against oversized input and upstream/unexpected errors."""
+
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
+import anthropic
+import httpx
 import pytest
 from conftest import TEST_EMAIL
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 
+from shortimer.app import app
+from shortimer.config import get_settings
 from shortimer.model.user import User
 from shortimer.model.workout import (
     Movement,
@@ -13,8 +21,11 @@ from shortimer.model.workout import (
 )
 from shortimer.util.dedup import source_hash
 
+SignInAs = Callable[[AsyncClient, str], Awaitable[str]]
+
 
 def _fran() -> Workout:
+    """A ready-to-save Fran, the fixture workout most of this file builds on."""
     return Workout(
         name="Fran",
         mode=WorkoutMode.FOR_TIME,
@@ -28,16 +39,19 @@ def _fran() -> Workout:
 
 
 async def test_login_requires_the_correct_password(client: AsyncClient, account: User) -> None:
+    """A wrong password is rejected."""
     response = await client.post("/api/auth/login", json={"email": TEST_EMAIL, "password": "wrong"})
     assert response.status_code == 401
 
 
 async def test_workouts_require_auth(client: AsyncClient) -> None:
+    """An unauthenticated request to the library is rejected."""
     response = await client.get("/api/workouts")
     assert response.status_code == 401
 
 
 async def test_login_then_crud_flow(authed_client: AsyncClient) -> None:
+    """Create, list, read, update, and delete a workout, end to end."""
     created = await authed_client.post(
         "/api/workouts", json={"workout": _fran().model_dump(mode="json")}
     )
@@ -68,6 +82,7 @@ async def test_login_then_crud_flow(authed_client: AsyncClient) -> None:
 
 
 async def test_get_unknown_workout_is_404(authed_client: AsyncClient) -> None:
+    """Fetching an id that doesn't exist reports 404."""
     response = await authed_client.get("/api/workouts/does-not-exist")
     assert response.status_code == 404
 
@@ -75,7 +90,10 @@ async def test_get_unknown_workout_is_404(authed_client: AsyncClient) -> None:
 async def test_parse_endpoint_uses_llm_parser(
     authed_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """`/parse` returns a preview built from the (mocked) parser's output, unsaved."""
+
     async def fake_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
+        """A fake parser that returns a canned Fran carrying the given source text."""
         return _fran().model_copy(update={"source_text": text})
 
     monkeypatch.setattr("shortimer.router.workouts.parse_workout_text", fake_parse)
@@ -88,6 +106,7 @@ async def test_parse_endpoint_uses_llm_parser(
 
 
 async def test_create_is_idempotent_by_source_text(authed_client: AsyncClient) -> None:
+    """Saving the same source text twice (modulo whitespace/case) returns the existing record."""
     payload = _fran().model_copy(update={"source_text": "Fran\n21-15-9\nThrusters\nPull-ups"})
     first = await authed_client.post(
         "/api/workouts", json={"workout": payload.model_dump(mode="json")}
@@ -111,6 +130,7 @@ async def test_create_is_idempotent_by_source_text(authed_client: AsyncClient) -
 async def test_parse_reuses_saved_workout_without_calling_llm(
     authed_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Parsing text that matches an already-saved workout returns it instead of calling the model."""
     text = "Cindy\nAMRAP 20\n5 pull-ups\n10 push-ups\n15 air squats"
     saved = await authed_client.post(
         "/api/workouts",
@@ -119,6 +139,7 @@ async def test_parse_reuses_saved_workout_without_calling_llm(
     saved_id = saved.json()["id"]
 
     async def exploding_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
+        """A fake parser that fails the test if it's ever called."""
         raise AssertionError("LLM should not be called for a cached workout")
 
     monkeypatch.setattr("shortimer.router.workouts.parse_workout_text", exploding_parse)
@@ -156,6 +177,7 @@ async def test_another_owners_workout_is_invisible(
     # Dedup must not hand us another owner's record for identical text — it
     # should miss the cache and parse fresh instead.
     async def fake_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
+        """A fake parser that returns a canned Fran carrying the given source text."""
         return _fran().model_copy(update={"source_text": text})
 
     monkeypatch.setattr("shortimer.router.workouts.parse_workout_text", fake_parse)
@@ -176,6 +198,7 @@ async def test_loading_a_prewarmed_wod_costs_no_llm_call(
     await remember_parse(Workout(name="Sunday 260719", mode=WorkoutMode.FOR_TIME, source_text=text))
 
     async def exploding_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
+        """A fake parser that fails the test if it's ever called."""
         raise AssertionError("a pre-parsed WOD must not hit the model")
 
     monkeypatch.setattr("shortimer.router.workouts.parse_workout_text", exploding_parse)
@@ -201,6 +224,7 @@ async def test_parse_is_shared_across_owners(
     calls = 0
 
     async def counting_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
+        """A fake `parse_workout_text` that counts its own calls instead of hitting the model."""
         nonlocal calls
         calls += 1
         return _fran().model_copy(update={"source_text": text})
@@ -232,6 +256,7 @@ async def test_one_owners_edits_do_not_leak_to_another(
     from shortimer.auth.session import current_owner
 
     async def fake_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
+        """A fake parser that returns a canned Fran carrying the given source text."""
         return _fran().model_copy(update={"source_text": text})
 
     monkeypatch.setattr("shortimer.router.workouts.parse_workout_text", fake_parse)
@@ -256,6 +281,7 @@ async def test_one_owners_edits_do_not_leak_to_another(
 
 
 async def test_seed_benchmarks_is_idempotent(authed_client: AsyncClient) -> None:
+    """Seeding twice adds the benchmark library once and skips it the second time."""
     first = await authed_client.post("/api/workouts/seed")
     assert first.status_code == 200
     assert first.json()["added"] > 0
@@ -275,9 +301,11 @@ async def test_seed_benchmarks_is_idempotent(authed_client: AsyncClient) -> None
 async def test_from_text_creates_then_caches(
     authed_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """`/from-text` parses and saves on the first call, then returns the saved copy on the second."""
     calls = 0
 
     async def counting_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
+        """A fake `parse_workout_text` that counts its own calls instead of hitting the model."""
         nonlocal calls
         calls += 1
         return _fran().model_copy(update={"source_text": text})
@@ -297,6 +325,7 @@ async def test_from_text_creates_then_caches(
 
 
 async def _save(client: AsyncClient, workout: Workout) -> str:
+    """Save `workout` via the API and return its assigned id."""
     response = await client.post("/api/workouts", json={"workout": workout.model_dump(mode="json")})
     assert response.status_code == 201
     return str(response.json()["id"])
@@ -311,6 +340,7 @@ def _dated(name: str, day: int, **fields: object) -> Workout:
 
 
 async def test_list_pages_newest_first(authed_client: AsyncClient) -> None:
+    """Paging through a 7-item library, 3 at a time, returns them newest-first, then empties out."""
     for day in range(1, 8):
         await _save(authed_client, _dated(f"Day {day}", day))
 
@@ -344,6 +374,7 @@ async def test_list_pages_newest_first(authed_client: AsyncClient) -> None:
 async def test_list_rejects_out_of_range_paging(
     authed_client: AsyncClient, params: dict[str, int | str]
 ) -> None:
+    """An out-of-bounds limit, offset, or an overlong query string is rejected."""
     response = await authed_client.get("/api/workouts", params=params)
     assert response.status_code == 422
 
@@ -363,6 +394,7 @@ async def test_search_spans_the_whole_library_not_just_the_page(
 
 
 async def test_search_matches_the_fields_the_row_shows(authed_client: AsyncClient) -> None:
+    """A search term matches name, category, movement, or mode label, and terms AND together."""
     await _save(authed_client, _dated("Fran", 1, category="benchmark"))
     await _save(
         authed_client,
@@ -376,6 +408,7 @@ async def test_search_matches_the_fields_the_row_shows(authed_client: AsyncClien
     )
 
     async def names(query: str) -> list[str]:
+        """Names of the workouts a search for `query` returns."""
         response = await authed_client.get("/api/workouts", params={"q": query})
         return [w["name"] for w in response.json()["items"]]
 
@@ -404,11 +437,13 @@ async def test_search_treats_the_query_literally(authed_client: AsyncClient) -> 
 
 
 async def test_filters_narrow_by_mode_and_category(authed_client: AsyncClient) -> None:
+    """The mode and category filters combine with each other and with a search term."""
     await _save(authed_client, _dated("Fran", 1, category="benchmark"))
     await _save(authed_client, _dated("Grace", 2, category="girls"))
     await _save(authed_client, _dated("Cindy", 3, category="girls", mode=WorkoutMode.AMRAP))
 
     async def names(**params: str) -> list[str]:
+        """Names of the workouts a request with `params` returns."""
         response = await authed_client.get("/api/workouts", params=params)
         assert response.status_code == 200
         return [w["name"] for w in response.json()["items"]]
@@ -432,11 +467,13 @@ async def test_filters_narrow_the_total_not_just_the_page(authed_client: AsyncCl
 
 
 async def test_list_rejects_an_unknown_mode(authed_client: AsyncClient) -> None:
+    """A `mode` filter value outside the enum is rejected."""
     response = await authed_client.get("/api/workouts", params={"mode": "nonsense"})
     assert response.status_code == 422
 
 
 async def test_categories_lists_this_owners_categories_only(authed_client: AsyncClient) -> None:
+    """The categories endpoint returns only this owner's categories: sorted, no blanks, no others'."""
     from shortimer.cache.db import get_workouts_collection
 
     await _save(authed_client, _dated("Fran", 1, category="benchmark"))
@@ -465,3 +502,148 @@ async def test_categories_path_is_not_read_as_a_workout_id(authed_client: AsyncC
     response = await authed_client.get("/api/workouts/categories")
     assert response.status_code == 200
     assert isinstance(response.json(), list)
+
+
+# --- Hardening: input limits, id assignment, and upstream error mapping ------
+
+
+async def test_oversized_paste_is_rejected_before_the_model(
+    authed_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A huge paste must not reach the model and run up a token bill."""
+
+    async def exploding_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
+        """A fake parser that fails the test if it's ever called."""
+        raise AssertionError("oversized input must be rejected before parsing")
+
+    monkeypatch.setattr("shortimer.router.workouts.parse_workout_text", exploding_parse)
+
+    response = await authed_client.post("/api/workouts/parse", json={"text": "x" * 20_001})
+    assert response.status_code == 422
+
+
+async def test_empty_paste_is_rejected(authed_client: AsyncClient) -> None:
+    """An empty text field fails validation rather than reaching the parser."""
+    assert (await authed_client.post("/api/workouts/parse", json={"text": ""})).status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_status"),
+    [
+        (
+            anthropic.APITimeoutError(request=httpx.Request("POST", "https://api.anthropic.com")),
+            504,
+        ),
+        (
+            anthropic.APIConnectionError(
+                request=httpx.Request("POST", "https://api.anthropic.com")
+            ),
+            503,
+        ),
+    ],
+)
+async def test_upstream_failures_map_to_useful_statuses(
+    authed_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+    expected_status: int,
+    account: User,
+    sign_in_as: SignInAs,
+) -> None:
+    """A parser outage should be a clear, retryable answer — not a bare 500."""
+
+    async def failing_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
+        """A fake parser that raises the parametrized upstream error."""
+        raise error
+
+    monkeypatch.setattr("shortimer.router.workouts.parse_workout_text", failing_parse)
+
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as raw:
+        await sign_in_as(raw, account.id)
+        response = await raw.post("/api/workouts/parse", json={"text": "Fran\n21-15-9"})
+
+    assert response.status_code == expected_status
+    assert "detail" in response.json()
+    # The message is for a human, and says nothing about internals.
+    assert "Traceback" not in response.text
+
+
+async def test_unexpected_errors_do_not_leak_internals(
+    monkeypatch: pytest.MonkeyPatch,
+    account: User,
+    sign_in_as: SignInAs,
+) -> None:
+    """A genuinely unhandled exception 500s with a generic message, never its own text."""
+
+    async def boom(text: str, name_hint: str | None = None, **_: object) -> Workout:
+        """A fake parser that raises an exception carrying text that must never leak."""
+        raise RuntimeError("secret internal detail: connection string xyz")
+
+    monkeypatch.setattr("shortimer.router.workouts.parse_workout_text", boom)
+
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as raw:
+        await sign_in_as(raw, account.id)
+        response = await raw.post("/api/workouts/parse", json={"text": "Fran\n21-15-9"})
+
+    assert response.status_code == 500
+    assert "secret internal detail" not in response.text
+    assert response.json()["detail"] == "Something went wrong. Please try again."
+
+
+async def test_unexpected_errors_still_carry_cors_headers(
+    monkeypatch: pytest.MonkeyPatch,
+    account: User,
+    sign_in_as: SignInAs,
+) -> None:
+    """A 500 the browser can't read is a 500 the user never sees.
+
+    The frontend and the API are separate origins in production, so a response
+    without `Access-Control-Allow-Origin` is blocked before any code can read
+    its body — the friendly message becomes an opaque network error. This is
+    what breaks if the catch-all is ever moved back to an `Exception` handler,
+    or registered after CORS in `app.py`.
+    """
+
+    async def boom(text: str, name_hint: str | None = None, **_: object) -> Workout:
+        """A fake parser that always raises, to trigger the catch-all 500 handler."""
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr("shortimer.router.workouts.parse_workout_text", boom)
+
+    origin = get_settings().cors_origins[0]
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as raw:
+        await sign_in_as(raw, account.id)
+        response = await raw.post(
+            "/api/workouts/parse",
+            json={"text": "Fran\n21-15-9"},
+            headers={"Origin": origin},
+        )
+
+    assert response.status_code == 500
+    assert response.headers.get("access-control-allow-origin") == origin
+
+
+async def test_create_ignores_a_client_supplied_id(authed_client: AsyncClient) -> None:
+    """Ids are server-assigned, so a caller can't name another owner's key.
+
+    Letting one through doesn't overwrite anything — the duplicate `_id` fails
+    the insert — but the failure tells the caller that id exists, and it is
+    reported as a database outage rather than a bad request.
+    """
+    payload = {
+        "workout": {
+            "id": "chosen-by-the-client",
+            "name": "Squatted",
+            "mode": "for_time",
+            "segments": [],
+        }
+    }
+    response = await authed_client.post("/api/workouts", json=payload)
+
+    assert response.status_code == 201
+    assert response.json()["id"] != "chosen-by-the-client"
+    # And the id the caller tried to claim is still free.
+    assert (await authed_client.get("/api/workouts/chosen-by-the-client")).status_code == 404

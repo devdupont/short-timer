@@ -1,4 +1,4 @@
-""""""
+"""Which workout feeds exist, and a user's home-page preferences over them."""
 
 from enum import StrEnum
 
@@ -50,6 +50,7 @@ class FeedPref(BaseModel):
 
 
 def default_feeds() -> list[FeedPref]:
+    """A brand-new account's feed list: every `FeedKind`, `DEFAULT_ENABLED_FEEDS` switched on."""
     return [
         FeedPref(kind=kind, enabled=kind in DEFAULT_ENABLED_FEEDS) for kind in DEFAULT_FEED_ORDER
     ]

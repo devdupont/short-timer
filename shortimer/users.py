@@ -10,8 +10,6 @@ rather than in `auth.py` because they need records, and `auth.py` deliberately
 knows only about session tokens. That keeps the import direction one-way.
 """
 
-from __future__ import annotations
-
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -23,7 +21,6 @@ from pymongo.errors import DuplicateKeyError
 from shortimer.auth.passwords import hash_password, needs_rehash
 from shortimer.auth.session import current_owner
 from shortimer.cache.crypto import SecretBox, SecretStatus, encrypt, is_configured
-from shortimer.cache.db import get_users_collection
 from shortimer.model.feed import normalize_feeds
 from shortimer.model.gym import GymConnection, GymConnectionUpdate, GymConnectionView, GymProvider
 from shortimer.model.status import AccountStatus, Role
@@ -44,26 +41,14 @@ def normalize_email(email: str) -> str:
     return email.strip().lower()
 
 
-def _to_document(user: User) -> dict[str, Any]:
-    doc = user.model_dump(mode="json")
-    doc["_id"] = doc.pop("id")
-    return doc
-
-
-def _from_document(doc: dict[str, Any]) -> User:
-    data = dict(doc)
-    data["id"] = data.pop("_id")
-    return User(**data)
-
-
 async def get_user(user_id: str) -> User | None:
-    doc = await get_users_collection().find_one({"_id": user_id})
-    return _from_document(doc) if doc is not None else None
+    """The user with this id, or None."""
+    return await User.get(user_id)
 
 
 async def get_user_by_email(email: str) -> User | None:
-    doc = await get_users_collection().find_one({"email": normalize_email(email)})
-    return _from_document(doc) if doc is not None else None
+    """The user with this address, or None. Case-insensitive, via `normalize_email`."""
+    return await User.find_one(User.email == normalize_email(email))
 
 
 # --- Dependencies -----------------------------------------------------------
@@ -98,6 +83,7 @@ def require_role(*allowed: Role) -> Callable[[User], Awaitable[User]]:
     permitted = frozenset(allowed)
 
     async def dependency(user: Annotated[User, Depends(current_user)]) -> User:
+        """The signed-in user, if their role is one of `permitted`."""
         if user.role not in permitted:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
         return user
@@ -138,7 +124,7 @@ async def create_user(
         display_name=display_name.strip(),
     )
     try:
-        await get_users_collection().insert_one(_to_document(user))
+        await user.insert()
     except DuplicateKeyError as exc:
         raise EmailAlreadyRegisteredError(email) from exc
     logger.info("Created account %s with role %s.", user.id, user.role.value)
@@ -146,10 +132,12 @@ async def create_user(
 
 
 async def set_password(user_id: str, password: str) -> None:
+    """Hash and store a new password for this user."""
     await _update_fields(user_id, {"password_hash": hash_password(password)})
 
 
 async def mark_email_verified(user_id: str) -> None:
+    """Flip `email_verified` on for this user."""
     await _update_fields(user_id, {"email_verified": True})
 
 
@@ -166,8 +154,9 @@ async def rehash_if_needed(user: User, password: str) -> None:
 
 
 async def _update_fields(user_id: str, fields: dict[str, Any]) -> None:
-    await get_users_collection().update_one(
-        {"_id": user_id}, {"$set": {**fields, "updated_at": datetime.now(UTC).isoformat()}}
+    """`$set` `fields` on a user, stamping `updated_at` alongside them."""
+    await User.find_one(User.id == user_id).update(
+        {"$set": {**fields, "updated_at": datetime.now(UTC)}}
     )
 
 
@@ -182,6 +171,7 @@ def _status(box: SecretBox | None) -> SecretStatus:
 
 
 def _connection_view(connection: GymConnection) -> GymConnectionView:
+    """One stored connection with its credential reduced to a `SecretStatus`."""
     return GymConnectionView(
         provider=connection.provider,
         credential=_status(connection.credential),
@@ -202,6 +192,7 @@ def to_view(config: UserConfig) -> UserConfigView:
 
 
 def to_me(user: User) -> MeResponse:
+    """A user as `GET /api/me` returns them: credentials masked, config viewed."""
     return MeResponse(
         id=user.id,
         email=user.email,
@@ -271,14 +262,8 @@ async def update_config(user: User, update: UserConfigUpdate) -> User:
     if update.feeds is not None:
         config.feeds = normalize_feeds(update.feeds)
 
-    updated = user.model_copy(update={"config": config, "updated_at": datetime.now(UTC)})
-    await get_users_collection().update_one(
-        {"_id": updated.id},
-        {
-            "$set": {
-                "config": config.model_dump(mode="json"),
-                "updated_at": updated.updated_at.isoformat(),
-            }
-        },
+    updated: User = user.model_copy(update={"config": config, "updated_at": datetime.now(UTC)})
+    await User.find_one(User.id == updated.id).update(
+        {"$set": {"config": config.model_dump(mode="json"), "updated_at": updated.updated_at}}
     )
     return updated

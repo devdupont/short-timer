@@ -1,3 +1,5 @@
+"""The Concept2 feed: Honorboard parsing, gap-filling refresh, pre-parse sharing, and the endpoint."""
+
 from datetime import date
 
 import httpx
@@ -12,8 +14,8 @@ from shortimer.cache.concept2 import (
     read_cached_wods,
     refresh_concept2_cache,
 )
-from shortimer.cache.db import get_concept2_cache_collection
 from shortimer.cache.parse import find_parse
+from shortimer.model.feed_cache import Concept2CacheEntry
 from shortimer.model.workout import Workout, WorkoutMode
 from shortimer.service import concept2
 from shortimer.service.concept2 import fetch_wod, parse_wod_page
@@ -55,6 +57,7 @@ def test_parse_keeps_heading_and_description() -> None:
 
 
 def test_parse_tolerates_a_day_with_no_description() -> None:
+    """A page with only the heading and no following paragraph still parses, sans description."""
     wod = parse_wod_page(_page(_TITLE, description=None), date(2026, 7, 22))
     assert wod is not None
     assert wod.text == _TITLE
@@ -76,6 +79,7 @@ async def test_fetch_treats_a_500_as_a_missing_day() -> None:
 
 @respx.mock
 async def test_fetch_recent_skips_failures() -> None:
+    """One failing day among the requested window is dropped, not fatal to the rest."""
     respx.get("https://log.concept2.com/wod/2026-07-22/rowerg").mock(
         return_value=Response(200, text=_page(_TITLE))
     )
@@ -104,6 +108,7 @@ async def test_refresh_only_fetches_days_it_does_not_have() -> None:
 
 @respx.mock
 async def test_refresh_fills_a_gap_left_by_downtime() -> None:
+    """Three missed days, caught up in one refresh, since Concept2 is date-addressable."""
     respx.route(url__regex=_URL_PATTERN).mock(return_value=Response(200, text=_page(_TITLE)))
     await refresh_concept2_cache(force=True, today=date(2026, 7, 18))
 
@@ -115,6 +120,7 @@ async def test_refresh_fills_a_gap_left_by_downtime() -> None:
 
 @respx.mock
 async def test_refresh_keeps_stale_cache_when_upstream_fails() -> None:
+    """Concept2 going down mid-run leaves the previously cached days untouched."""
     respx.route(url__regex=_URL_PATTERN).mock(return_value=Response(200, text=_page(_TITLE)))
     await refresh_concept2_cache(force=True, today=date(2026, 7, 21))
     cached = await read_cached_wods(CACHE_DAYS)
@@ -126,6 +132,7 @@ async def test_refresh_keeps_stale_cache_when_upstream_fails() -> None:
 
 @respx.mock
 async def test_wods_are_served_from_cache_without_refetching() -> None:
+    """The daily refresh is the only thing that should hit Concept2."""
     route = respx.route(url__regex=_URL_PATTERN).mock(
         return_value=Response(200, text=_page(_TITLE))
     )
@@ -144,6 +151,7 @@ async def test_a_repeated_workout_is_only_parsed_once(monkeypatch: pytest.Monkey
     calls = 0
 
     async def counting_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
+        """A fake `parse_workout_text` that counts its own calls instead of hitting the model."""
         nonlocal calls
         calls += 1
         return Workout(name="Parsed", mode=WorkoutMode.INTERVAL, source_text=text)
@@ -165,6 +173,7 @@ async def test_a_repeated_workout_is_only_parsed_once(monkeypatch: pytest.Monkey
 
 @respx.mock
 async def test_endpoint_marks_saved(authed_client: AsyncClient) -> None:
+    """A day whose text matches a workout already in the caller's library reports its saved id."""
     respx.route(url__regex=_URL_PATTERN).mock(return_value=Response(200, text=_page(_TITLE)))
     text = f"{_TITLE}\n\nSeven alternating intervals."
     saved = await authed_client.post(
@@ -187,6 +196,7 @@ async def test_endpoint_marks_saved(authed_client: AsyncClient) -> None:
 
 @respx.mock
 async def test_endpoint_unsaved_is_null(authed_client: AsyncClient) -> None:
+    """A day not in the caller's library reports `saved_workout_id` as null."""
     respx.route(url__regex=_URL_PATTERN).mock(return_value=Response(200, text=_page(_TITLE)))
     response = await authed_client.get("/api/concept2/wods?days=1")
     assert response.status_code == 200
@@ -194,6 +204,7 @@ async def test_endpoint_unsaved_is_null(authed_client: AsyncClient) -> None:
 
 
 async def test_endpoint_requires_auth(client: AsyncClient) -> None:
+    """An unauthenticated request to the feed is rejected."""
     assert (await client.get("/api/concept2/wods")).status_code == 401
 
 
@@ -202,12 +213,12 @@ async def test_existing_rows_are_not_rewritten() -> None:
     """A cached day is never refetched, so a paid-for parse can't be invalidated."""
     respx.route(url__regex=_URL_PATTERN).mock(return_value=Response(200, text=_page(_TITLE)))
     await refresh_concept2_cache(force=True, today=date(2026, 7, 22))
-    before = await get_concept2_cache_collection().find_one({"_id": "2026-07-22"})
+    before = await Concept2CacheEntry.get("2026-07-22")
     assert before is not None
 
     respx.route(url__regex=_URL_PATTERN).mock(
         return_value=Response(200, text=_page("A different workout"))
     )
     assert await refresh_concept2_cache(force=True, today=date(2026, 7, 22)) == 0
-    after = await get_concept2_cache_collection().find_one({"_id": "2026-07-22"})
-    assert after is not None and after["title"] == _TITLE
+    after = await Concept2CacheEntry.get("2026-07-22")
+    assert after is not None and after.title == _TITLE

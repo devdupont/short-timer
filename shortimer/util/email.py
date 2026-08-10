@@ -41,6 +41,8 @@ class EmailError(RuntimeError):
 
 @dataclass(frozen=True)
 class Message:
+    """A plain-text email ready to hand to `send`."""
+
     to: str
     subject: str
     text: str
@@ -58,6 +60,7 @@ def _link(path: str, token: str) -> str:
 
 
 def invite_message(to: str, token: str) -> Message:
+    """The message sent when an admin invites `to` to sign up."""
     return Message(
         to=to,
         subject="You're invited to shortimer",
@@ -71,6 +74,7 @@ def invite_message(to: str, token: str) -> Message:
 
 
 def verify_message(to: str, token: str) -> Message:
+    """The address-confirmation message sent after registration."""
     return Message(
         to=to,
         subject="Confirm your email for shortimer",
@@ -84,6 +88,7 @@ def verify_message(to: str, token: str) -> Message:
 
 
 def reset_message(to: str, token: str) -> Message:
+    """The message sent when a password reset is requested for `to`."""
     return Message(
         to=to,
         subject="Reset your shortimer password",

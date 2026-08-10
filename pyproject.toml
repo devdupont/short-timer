@@ -17,7 +17,12 @@ dependencies = [
     # the register and invite payloads.
     "pydantic[email]>=2.9",
     "pydantic-settings>=2.6",
-    "pymongo>=4.9",
+    # Beanie caps Python below 3.14 as of 2.2.0 — this repo doesn't run on
+    # 3.14 yet either (only ruff's target-version aspirationally names it),
+    # so this isn't a new constraint in practice. Revisit the ruff target
+    # once Beanie lifts the cap.
+    "beanie>=2.2,<3",
+    "pymongo>=4.11,!=4.15.0",
     # Resolves mongodb+srv:// URIs (MongoDB Atlas). Current pymongo requires it
     # anyway, but the deployment depends on it, so declare it explicitly.
     "dnspython>=2.6",
@@ -80,10 +85,26 @@ plugins = ["pydantic.mypy"]
 python_version = "3.12"
 strict = true
 files = ["shortimer"]
+# Test modules do `from conftest import ...` (pytest resolves this via its own
+# `pythonpath` ini setting); mypy needs the same directory on its own search
+# path to resolve those imports when it type-checks tests/ too.
+mypy_path = ["tests"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# The suite is organized into per-submodule directories (tests/auth,
+# tests/router, ...) without __init__.py files. Two things follow from that:
+#
+# - `from conftest import ...` (used for shared constants like TEST_EMAIL)
+#   needs `tests/` on sys.path regardless of how deep a test file is nested.
+# - The default "prepend" import mode would *also* put each test file's own
+#   directory on sys.path — ahead of the entry above — so a subdirectory's
+#   own conftest.py (e.g. tests/router/conftest.py) would shadow the shared
+#   one for that bare import. "importlib" mode imports test files without
+#   touching sys.path at all, so only the entry below is ever in play.
+addopts = ["--import-mode=importlib"]
+pythonpath = ["tests"]
 markers = ["live: hits the real Anthropic API; needs a real ANTHROPIC_API_KEY"]
 # mongomock calls the deprecated datetime.utcnow() internally, once per index
 # operation — and every test now builds the indexes, so this drowns out our own

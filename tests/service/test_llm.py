@@ -22,11 +22,13 @@ import pytest
 from shortimer.model.workout import IntervalClock, WorkoutMode
 from shortimer.service import llm
 
-FIXTURES_PATH = Path(__file__).parent / "fixtures" / "workouts.json"
+FIXTURES_PATH = Path(__file__).parent.parent / "fixtures" / "workouts.json"
 FIXTURES: list[dict[str, Any]] = json.loads(FIXTURES_PATH.read_text())
 
 
 class _FakeToolUseBlock:
+    """A minimal stand-in for the SDK's tool-use content block."""
+
     type = "tool_use"
 
     def __init__(self, tool_input: dict[str, Any]) -> None:
@@ -34,22 +36,29 @@ class _FakeToolUseBlock:
 
 
 class _FakeMessage:
+    """A minimal stand-in for the SDK's `Message` response."""
+
     def __init__(self, content: list[Any]) -> None:
         self.content = content
 
 
 class _FakeMessages:
+    """Stands in for `AsyncAnthropic().messages`, returning a canned tool-use reply."""
+
     def __init__(self, tool_input: dict[str, Any] | None, captured: dict[str, Any]) -> None:
         self._tool_input = tool_input
         self._captured = captured
 
     async def create(self, **kwargs: Any) -> _FakeMessage:
+        """Record the call's kwargs and answer with `_tool_input`, or no tool use if None."""
         self._captured.update(kwargs)
         content = [] if self._tool_input is None else [_FakeToolUseBlock(self._tool_input)]
         return _FakeMessage(content)
 
 
 class _FakeAsyncAnthropic:
+    """Stands in for `AsyncAnthropic` itself, so no real client or network is involved."""
+
     def __init__(self, tool_input: dict[str, Any] | None, captured: dict[str, Any]) -> None:
         self.messages = _FakeMessages(tool_input, captured)
 
@@ -57,6 +66,7 @@ class _FakeAsyncAnthropic:
 def _patch_anthropic(
     monkeypatch: pytest.MonkeyPatch, tool_input: dict[str, Any] | None
 ) -> dict[str, Any]:
+    """Swap in `_FakeAsyncAnthropic`; returns the dict the call's kwargs get captured into."""
     captured: dict[str, Any] = {}
     monkeypatch.setattr(
         llm, "AsyncAnthropic", lambda **_: _FakeAsyncAnthropic(tool_input, captured)
@@ -67,6 +77,7 @@ def _patch_anthropic(
 async def test_parse_workout_text_forces_the_emit_workout_tool(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The call forces the `emit_workout` tool, and the reply maps onto the returned Workout."""
     captured = _patch_anthropic(
         monkeypatch,
         {"name": "Fran", "mode": "for_time", "rep_scheme": [21, 15, 9], "segments": []},
@@ -123,6 +134,7 @@ async def test_parse_keeps_an_up_counting_clock(monkeypatch: pytest.MonkeyPatch)
 
 
 async def test_parse_defaults_to_counting_down(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A model reply with no `interval_clock` field defaults to counting down."""
     _patch_anthropic(monkeypatch, {"name": "Chelsea", "mode": "emom", "segments": []})
 
     workout = await llm.parse_workout_text("EMOM 30")
@@ -131,6 +143,7 @@ async def test_parse_defaults_to_counting_down(monkeypatch: pytest.MonkeyPatch) 
 
 
 async def test_workout_tool_offers_the_clock_direction(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The `emit_workout` tool schema offered to the model includes both clock directions."""
     captured = _patch_anthropic(monkeypatch, {"name": "x", "mode": "interval", "segments": []})
 
     await llm.parse_workout_text("Every 3:00 x 5 Sets")
@@ -140,6 +153,7 @@ async def test_workout_tool_offers_the_clock_direction(monkeypatch: pytest.Monke
 
 
 async def test_workout_tool_offers_is_rest(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The `emit_workout` tool schema's segment shape includes the `is_rest` field."""
     captured = _patch_anthropic(monkeypatch, {"name": "x", "mode": "emom", "segments": []})
 
     await llm.parse_workout_text("15:00 EMOM")
@@ -149,6 +163,7 @@ async def test_workout_tool_offers_is_rest(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 async def test_parse_workout_text_raises_without_tool_use(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A reply with no tool-use content raises `WorkoutParseError` rather than crashing on it."""
     _patch_anthropic(monkeypatch, None)
 
     with pytest.raises(llm.WorkoutParseError):
@@ -158,6 +173,7 @@ async def test_parse_workout_text_raises_without_tool_use(monkeypatch: pytest.Mo
 async def test_parse_workout_text_raises_on_invalid_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A tool-use payload that fails Workout validation raises `WorkoutParseError`."""
     _patch_anthropic(monkeypatch, {"mode": "not-a-real-mode", "segments": []})
 
     with pytest.raises(llm.WorkoutParseError):
@@ -165,6 +181,7 @@ async def test_parse_workout_text_raises_on_invalid_payload(
 
 
 def _has_real_api_key() -> bool:
+    """Whether a real (non-placeholder) `ANTHROPIC_API_KEY` is configured for the `live` fixtures."""
     key = os.environ.get("ANTHROPIC_API_KEY", "")
     return bool(key) and key != "test-anthropic-key"
 
@@ -173,6 +190,7 @@ def _has_real_api_key() -> bool:
 @pytest.mark.skipif(not _has_real_api_key(), reason="needs a real ANTHROPIC_API_KEY")
 @pytest.mark.parametrize("fixture", FIXTURES, ids=[f["name"] for f in FIXTURES])
 async def test_fixture_parses_to_expected_shape(fixture: dict[str, Any]) -> None:
+    """One curated real-world workout, parsed by the real model, matches its fixture's expectations."""
     workout = await llm.parse_workout_text(fixture["source_text"], name_hint=fixture["name"])
 
     assert workout.mode.value == fixture["expected_mode"]

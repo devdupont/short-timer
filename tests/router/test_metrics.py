@@ -1,6 +1,5 @@
 """Event recording, pricing, and the two aggregation endpoints."""
 
-from collections.abc import Generator
 from typing import ClassVar, NoReturn
 
 import pytest
@@ -29,18 +28,11 @@ from shortimer.model.user import User
 from shortimer.model.workout import Workout, WorkoutMode
 from shortimer.users import get_user
 
-
-@pytest.fixture(autouse=True)
-def _clear_settings_cache() -> Generator[None]:
-    get_settings.cache_clear()
-    yield
-    get_settings.cache_clear()
-
-
 # --- Recording ---------------------------------------------------------------
 
 
 async def test_an_event_is_stored_with_its_type_and_owner() -> None:
+    """A recorded event carries its type, owner, timestamp, and arbitrary extra data."""
     await record(EventType.LOGIN, owner_id="someone", extra="value")
     [doc] = [d async for d in get_events_collection().find({})]
     assert doc["type"] == "login"
@@ -53,6 +45,7 @@ async def test_recording_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     """A lost metric must not cost a request the user already paid for."""
 
     def exploding_collection() -> NoReturn:
+        """A fake collection getter that always raises, simulating a database outage."""
         raise RuntimeError("database on fire")
 
     monkeypatch.setattr("shortimer.metrics.get_events_collection", exploding_collection)
@@ -90,6 +83,7 @@ def test_a_typical_parse_costs_what_the_pricing_doc_says() -> None:
 
 
 def test_an_unknown_model_reports_no_cost_rather_than_a_wrong_one() -> None:
+    """A model with no entry in `MODEL_PRICES` estimates to None, not zero or a guess."""
     assert estimate_cost("some-future-model", input_tokens=1000, output_tokens=100) is None
 
 
@@ -125,6 +119,7 @@ async def test_an_unpriced_model_marks_the_total_incomplete() -> None:
 
 
 async def test_parses_are_grouped_by_outcome() -> None:
+    """A breakdown groups recorded parses by outcome and counts each."""
     for outcome in (
         ParseOutcome.LIBRARY_HIT,
         ParseOutcome.POOL_HIT,
@@ -141,6 +136,7 @@ async def test_parses_are_grouped_by_outcome() -> None:
 
 
 async def test_one_users_events_do_not_appear_in_anothers_breakdown() -> None:
+    """A breakdown scoped to one owner excludes another owner's events."""
     await record_parse(outcome=ParseOutcome.MODEL_CALL, owner_id="me")
     await record_parse(outcome=ParseOutcome.MODEL_CALL, owner_id="someone-else")
     assert await parse_breakdown(30, owner_id="me") == {"model_call": 1}
@@ -152,6 +148,7 @@ async def test_one_users_events_do_not_appear_in_anothers_breakdown() -> None:
 async def test_me_metrics_reports_the_callers_own_usage(
     authed_client: AsyncClient, account: User
 ) -> None:
+    """`/api/metrics/me` reports the caller's own parse counts and cache hit rate, not another's."""
     await record_parse(outcome=ParseOutcome.POOL_HIT, owner_id=account.id)
     await record_parse(outcome=ParseOutcome.MODEL_CALL, owner_id=account.id)
     await record_parse(outcome=ParseOutcome.MODEL_CALL, owner_id="someone-else")
@@ -176,6 +173,7 @@ async def test_me_metrics_never_reports_cost(authed_client: AsyncClient, account
 async def test_failed_parses_do_not_move_the_cache_hit_rate(
     authed_client: AsyncClient, account: User
 ) -> None:
+    """A failed parse is excluded from the cache-hit-rate denominator, not counted as a miss."""
     await record_parse(outcome=ParseOutcome.POOL_HIT, owner_id=account.id)
     await record_parse(outcome=ParseOutcome.FAILED, owner_id=account.id)
 
@@ -186,6 +184,7 @@ async def test_failed_parses_do_not_move_the_cache_hit_rate(
 
 
 async def test_metrics_require_a_session(client: AsyncClient) -> None:
+    """Unauthenticated requests to either metrics endpoint are rejected."""
     assert (await client.get("/api/metrics/me")).status_code == 401
     assert (await client.get("/api/metrics/operator")).status_code == 401
 
@@ -198,6 +197,7 @@ async def test_operator_metrics_are_off_by_default(authed_client: AsyncClient) -
 async def test_operator_metrics_open_for_an_allowlisted_user(
     authed_client: AsyncClient, monkeypatch: pytest.MonkeyPatch, account: User
 ) -> None:
+    """A caller named in `METRICS_ADMIN_USER_IDS` can read the deployment-wide spend and activity."""
     monkeypatch.setenv("METRICS_ADMIN_USER_IDS", account.id)
     get_settings.cache_clear()
 
@@ -226,6 +226,7 @@ async def test_a_non_allowlisted_user_gets_404_not_403(
 
 
 async def _set_role(user_id: str, role: str) -> None:
+    """Set a user's role directly, bypassing the API."""
     await get_users_collection().update_one({"_id": user_id}, {"$set": {"role": role}})
 
 
@@ -244,6 +245,7 @@ async def test_operator_metrics_open_for_staff(authed_client: AsyncClient, accou
 
 
 async def test_plain_user_role_is_refused(authed_client: AsyncClient, account: User) -> None:
+    """The ordinary `user` role cannot read the operator metrics."""
     await _set_role(account.id, "user")
     assert (await authed_client.get("/api/metrics/operator")).status_code == 404
 
@@ -277,6 +279,7 @@ async def test_the_window_is_bounded(authed_client: AsyncClient) -> None:
 
 
 async def test_starting_a_workout_is_recorded(authed_client: AsyncClient, account: User) -> None:
+    """Marking a workout started increments the caller's `workouts_started` count."""
     workout = Workout(name="Fran", mode=WorkoutMode.FOR_TIME)
     doc = workout.model_dump(mode="json")
     doc["_id"] = doc.pop("id")
@@ -303,6 +306,7 @@ async def test_starting_another_owners_workout_is_a_404(authed_client: AsyncClie
 
 
 async def test_logging_in_is_recorded(client: AsyncClient, account: User) -> None:
+    """A successful login records one `login` event."""
     response = await client.post(
         "/api/auth/login", json={"email": TEST_EMAIL, "password": TEST_PASSWORD}
     )
@@ -311,6 +315,7 @@ async def test_logging_in_is_recorded(client: AsyncClient, account: User) -> Non
 
 
 async def test_a_rejected_login_is_not_recorded(client: AsyncClient, account: User) -> None:
+    """A failed login records no `login` event."""
     await client.post("/api/auth/login", json={"email": TEST_EMAIL, "password": "wrong"})
     assert await get_events_collection().count_documents({"type": "login"}) == 0
 
@@ -321,12 +326,16 @@ async def test_a_parse_records_both_the_outcome_and_the_tokens(
     """The two halves of the cost picture: what was asked for, and what it cost."""
 
     class FakeUsage:
+        """Stands in for the SDK's token-usage report on a response."""
+
         input_tokens = 2850
         output_tokens = 500
         cache_read_input_tokens = 0
         cache_creation_input_tokens = 0
 
     class FakeBlock:
+        """Stands in for the SDK's tool-use content block."""
+
         type = "tool_use"
         input: ClassVar[dict[str, object]] = {
             "name": "Fran",
@@ -335,15 +344,22 @@ async def test_a_parse_records_both_the_outcome_and_the_tokens(
         }
 
     class FakeResponse:
+        """Stands in for the SDK's `Message` response, carrying usage and content."""
+
         model = "claude-sonnet-5"
         usage = FakeUsage()
         content: ClassVar[list[object]] = [FakeBlock()]
 
     class FakeMessages:
+        """Stands in for `AsyncAnthropic().messages`, returning a canned tool-use reply."""
+
         async def create(self, **_: object) -> FakeResponse:
+            """Answer with the canned `FakeResponse`, ignoring the call's arguments."""
             return FakeResponse()
 
     class FakeClient:
+        """Stands in for `AsyncAnthropic` itself, so no real client or network is involved."""
+
         messages = FakeMessages()
 
     monkeypatch.setattr("shortimer.service.llm._client", lambda: FakeClient())
@@ -371,6 +387,7 @@ async def test_a_cached_parse_costs_nothing_and_says_so(
     await remember_parse(Workout(name="Fran", mode=WorkoutMode.FOR_TIME, source_text=text))
 
     async def exploding_parse(*_: object, **__: object) -> Workout:
+        """A fake parser that fails the test if it's ever called."""
         raise AssertionError("the pool should have served this")
 
     monkeypatch.setattr("shortimer.router.workouts.parse_workout_text", exploding_parse)
@@ -384,6 +401,7 @@ async def test_a_cached_parse_costs_nothing_and_says_so(
 
 
 async def test_completing_a_workout_is_recorded(authed_client: AsyncClient, account: User) -> None:
+    """Completing a started workout records the event and updates the caller's completion rate."""
     workout = Workout(name="Fran", mode=WorkoutMode.FOR_TIME)
     doc = workout.model_dump(mode="json")
     doc["_id"] = doc.pop("id")
@@ -462,6 +480,7 @@ async def test_an_implausible_elapsed_time_is_rejected(
 
 
 async def test_completing_another_owners_workout_is_a_404(authed_client: AsyncClient) -> None:
+    """Completing an id belonging to another owner 404s and records no event."""
     workout = Workout(name="Theirs", mode=WorkoutMode.FOR_TIME)
     doc = workout.model_dump(mode="json")
     doc["_id"] = doc.pop("id")

@@ -95,5 +95,6 @@ async def current_owner(
 async def require_session(
     session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> None:
+    """Dependency for routes that need auth but not the owner id itself."""
     if session is None or await resolve_session(session) is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")

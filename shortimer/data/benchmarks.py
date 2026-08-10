@@ -6,8 +6,6 @@ Jackie). They're pre-parsed and committed by
 `scripts/build_benchmark_seed.py`, so seeding a library costs no LLM calls.
 """
 
-from __future__ import annotations
-
 import json
 from functools import lru_cache
 from pathlib import Path
@@ -19,6 +17,7 @@ _SEED_PATH = Path(__file__).parent / "benchmark_wods.json"
 
 @lru_cache
 def _seed_data() -> tuple[dict[str, object], ...]:
+    """The raw seed JSON, parsed once and memoized — read-only, so callers can't mutate the cache."""
     return tuple(json.loads(_SEED_PATH.read_text()))
 
 

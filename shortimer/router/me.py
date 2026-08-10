@@ -6,8 +6,6 @@ response models (`MeResponse` carries `SecretStatus`, not `SecretBox`) rather
 than by remembering to strip fields here.
 """
 
-from __future__ import annotations
-
 import json
 from typing import Annotated
 
@@ -20,6 +18,7 @@ from shortimer.auth.session import require_session, session_token
 from shortimer.cache.crypto import SecretsNotConfiguredError
 from shortimer.cache.session import list_sessions, revoke_all_sessions
 from shortimer.config import get_settings
+from shortimer.errors import not_found
 from shortimer.model.passkey import Passkey, PasskeyChallengeResponse, PasskeyRegisterRequest
 from shortimer.model.register import ChangePasswordRequest
 from shortimer.model.token import ApiToken, ApiTokenCreatedResponse, ApiTokenCreateRequest
@@ -33,14 +32,16 @@ CurrentUser = Annotated[User, Depends(current_user)]
 
 
 async def _require_user(user_id: str) -> User:
+    """The user record for `user_id`, or a 404 — for handlers that only get an id."""
     user = await get_user(user_id)
     if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        not_found("User not found")
     return user
 
 
 @router.get("", response_model=MeResponse)
 async def read_me(user: CurrentUser) -> MeResponse:
+    """The caller's own account."""
     return to_me(user)
 
 
@@ -48,6 +49,7 @@ async def read_me(user: CurrentUser) -> MeResponse:
 async def write_config(
     body: UserConfigUpdate, owner_id: Annotated[str, Depends(writes_allowed)]
 ) -> MeResponse:
+    """Patch the caller's gym connections and/or feed preferences."""
     user = await _require_user(owner_id)
     try:
         updated = await update_config(user, body)
@@ -124,6 +126,7 @@ async def end_other_sessions(
 
 
 def _iso(value: object) -> str | None:
+    """ISO-format `value` if it's a datetime-like object, else None."""
     return value.isoformat() if hasattr(value, "isoformat") else None
 
 
@@ -137,8 +140,9 @@ async def passkey_register_challenge(user: CurrentUser) -> PasskeyChallengeRespo
     return PasskeyChallengeResponse(challenge_handle=handle, options=json.loads(options))
 
 
-@router.post("/passkeys", response_model=Passkey)
+@router.post("/passkeys", response_model=Passkey, response_model_by_alias=False)
 async def register_passkey(body: PasskeyRegisterRequest, user: CurrentUser) -> Passkey:
+    """Finish registering a passkey against the signed-in account."""
     try:
         return await passkeys.finish_registration(
             user, body.challenge_handle, body.credential, body.nickname
@@ -147,8 +151,9 @@ async def register_passkey(body: PasskeyRegisterRequest, user: CurrentUser) -> P
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
-@router.get("/passkeys", response_model=list[Passkey])
+@router.get("/passkeys", response_model=list[Passkey], response_model_by_alias=False)
 async def read_passkeys(user: CurrentUser) -> list[Passkey]:
+    """The caller's registered passkeys."""
     return await passkeys.list_passkeys(user.id)
 
 
@@ -161,13 +166,13 @@ async def delete_passkey(credential_id: str, user: CurrentUser) -> None:
     revisiting the day passkey-only accounts exist.
     """
     if not await passkeys.delete_passkey(user.id, credential_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such passkey.")
+        not_found("No such passkey.")
 
 
 # --- API tokens ---------------------------------------------------------------
 
 
-@router.post("/tokens", response_model=ApiTokenCreatedResponse)
+@router.post("/tokens", response_model=ApiTokenCreatedResponse, response_model_by_alias=False)
 async def create_api_token(
     body: ApiTokenCreateRequest, user: CurrentUser
 ) -> ApiTokenCreatedResponse:
@@ -190,12 +195,14 @@ async def create_api_token(
     return ApiTokenCreatedResponse(api_token=token, token=raw)
 
 
-@router.get("/tokens", response_model=list[ApiToken])
+@router.get("/tokens", response_model=list[ApiToken], response_model_by_alias=False)
 async def read_api_tokens(user: CurrentUser) -> list[ApiToken]:
+    """The caller's issued API tokens."""
     return await api_tokens.list_tokens(user.id)
 
 
 @router.delete("/tokens/{token_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def revoke_api_token(token_id: str, user: CurrentUser) -> None:
+    """Revoke one of the caller's API tokens."""
     if not await api_tokens.revoke_token(user.id, token_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such token.")
+        not_found("No such token.")

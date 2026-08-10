@@ -11,14 +11,13 @@ This runs server-side: the browser can't call crossfit.com cross-origin, and
 it lets us reuse the source text for LLM-parse caching.
 """
 
-from __future__ import annotations
-
-import asyncio
 import re
-from datetime import date, datetime, timedelta
+from datetime import date
 
 import httpx
-from pydantic import BaseModel
+
+from shortimer.model.feed_item import DatedFeedItem
+from shortimer.service._window import fetch_window, recent_dates
 
 # Leading \W* skips the markdown bold markers crossfit.com wraps it in.
 _REST_DAY = re.compile(r"^\W*rest day", re.IGNORECASE)
@@ -34,16 +33,12 @@ _API_URL = "https://www.crossfit.com/workout/{year}/{month:02d}/{day:02d}"
 _REQUEST_TIMEOUT = 15.0
 
 
-class Wod(BaseModel):
+class Wod(DatedFeedItem):
     """A single day's Workout of the Day from crossfit.com."""
-
-    date: date
-    title: str
-    text: str
-    url: str
 
 
 def _public_url(day: date) -> str:
+    """The human-facing crossfit.com page for `day`, as opposed to the JSON API URL."""
     return f"https://www.crossfit.com/{day:%y%m%d}"
 
 
@@ -77,8 +72,4 @@ async def fetch_wod(client: httpx.AsyncClient, day: date) -> Wod | None:
 
 async def fetch_recent_wods(days: int = 7, *, today: date | None = None) -> list[Wod]:
     """Fetch the most recent `days` WODs (today first), skipping any that fail."""
-    anchor = today or datetime.now().date()
-    targets = [anchor - timedelta(days=offset) for offset in range(max(1, days))]
-    async with httpx.AsyncClient(follow_redirects=True) as client:
-        results = await asyncio.gather(*(fetch_wod(client, day) for day in targets))
-    return [wod for wod in results if wod is not None]
+    return await fetch_window(recent_dates(days, today=today), fetch_wod)

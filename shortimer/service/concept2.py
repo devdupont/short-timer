@@ -23,15 +23,14 @@ the published range return a 500 rather than a 404, so any non-200 is simply
 treated as "no workout that day".
 """
 
-from __future__ import annotations
-
-import asyncio
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date
 
 import httpx
 from bs4 import BeautifulSoup
-from pydantic import BaseModel
+
+from shortimer.model.feed_item import DatedFeedItem
+from shortimer.service._window import fetch_window, recent_dates
 
 logger = logging.getLogger(__name__)
 
@@ -43,21 +42,12 @@ _URL = "https://log.concept2.com/wod/{day:%Y-%m-%d}/" + _ERG
 _REQUEST_TIMEOUT = 15.0
 
 
-class Concept2Wod(BaseModel):
-    """A single day's erg Workout of the Day.
-
-    Same shape as `crossfit.Wod`, kept separate for the same reason `GymWod`
-    is: the sources have different lifecycles, and collapsing them into one
-    model would invite assumptions from one to leak into the other.
-    """
-
-    date: date
-    title: str
-    text: str
-    url: str
+class Concept2Wod(DatedFeedItem):
+    """A single day's erg Workout of the Day."""
 
 
 def workout_url(day: date) -> str:
+    """The Concept2 Honorboard page for `day`."""
     return _URL.format(day=day)
 
 
@@ -115,15 +105,10 @@ async def fetch_wod(client: httpx.AsyncClient, day: date) -> Concept2Wod | None:
 
 async def fetch_days(days: list[date]) -> list[Concept2Wod]:
     """Fetch a specific set of days concurrently, newest first, skipping misses."""
-    if not days:
-        return []
-    async with httpx.AsyncClient(follow_redirects=True) as client:
-        results = await asyncio.gather(*(fetch_wod(client, day) for day in days))
-    found = [wod for wod in results if wod is not None]
+    found = await fetch_window(days, fetch_wod)
     return sorted(found, key=lambda wod: wod.date, reverse=True)
 
 
 async def fetch_recent_wods(days: int = 7, *, today: date | None = None) -> list[Concept2Wod]:
     """Fetch the most recent `days` workouts (today first), skipping any that fail."""
-    anchor = today or datetime.now().date()
-    return await fetch_days([anchor - timedelta(days=offset) for offset in range(max(1, days))])
+    return await fetch_days(recent_dates(days, today=today))

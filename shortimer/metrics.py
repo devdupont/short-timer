@@ -22,8 +22,6 @@ derived from them. An event carries ids, counts and enum labels — enough to
 answer "how much" and "how often", never "what did they paste".
 """
 
-from __future__ import annotations
-
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -48,6 +46,7 @@ MODEL_PRICES: dict[str, ModelPrice] = {
 
 
 def price_for(model: str) -> ModelPrice | None:
+    """The known list price for `model`, or None if it isn't in `MODEL_PRICES`."""
     return MODEL_PRICES.get(model)
 
 
@@ -128,14 +127,17 @@ async def record_model_call(
 async def record_parse(
     *, outcome: ParseOutcome, owner_id: str | None = None, source: str = "user"
 ) -> None:
+    """A parse resolved, and how — library hit, pool hit, model call, or failure."""
     await record(EventType.PARSE, owner_id=owner_id, outcome=outcome.value, source=source)
 
 
 async def record_feed_refresh(*, feed: str, ok: bool, rows: int = 0) -> None:
+    """One source's refresh attempt: which feed, whether it succeeded, rows written."""
     await record(EventType.FEED_REFRESH, feed=feed, ok=ok, rows=rows)
 
 
 async def record_workout_started(*, owner_id: str, workout_id: str, mode: str) -> None:
+    """A timer was started on a saved workout."""
     await record(EventType.WORKOUT_STARTED, owner_id=owner_id, workout_id=workout_id, mode=mode)
 
 
@@ -159,6 +161,7 @@ async def record_workout_completed(
 
 
 async def record_login(*, owner_id: str) -> None:
+    """A session was minted for `owner_id`."""
     await record(EventType.LOGIN, owner_id=owner_id)
 
 
@@ -166,6 +169,7 @@ async def record_login(*, owner_id: str) -> None:
 
 
 def _window(days: int) -> dict[str, Any]:
+    """A Mongo match clause for events at or after `days` ago."""
     return {"at": {"$gte": datetime.now(UTC) - timedelta(days=days)}}
 
 

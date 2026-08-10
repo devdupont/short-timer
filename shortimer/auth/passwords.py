@@ -16,8 +16,6 @@ the plaintext is available to re-hash with, so it's the only moment it can
 happen.
 """
 
-from __future__ import annotations
-
 import logging
 
 from argon2 import PasswordHasher

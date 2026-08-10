@@ -1,10 +1,11 @@
+"""The Hybrid Calisthenics feed: rotation parsing, single-document caching, projection, and the endpoint."""
+
 from datetime import date
 
 import pytest
 import respx
 from httpx import AsyncClient, Response
 
-from shortimer.cache.db import get_hybrid_cache_collection
 from shortimer.cache.hybrid import (
     ensure_wods_parsed,
     get_wods,
@@ -12,6 +13,7 @@ from shortimer.cache.hybrid import (
     refresh_hybrid_cache,
 )
 from shortimer.cache.parse import find_parse
+from shortimer.model.feed_cache import HybridRotationCache
 from shortimer.model.workout import Workout, WorkoutMode
 from shortimer.service.hybrid import PAGE_URL, is_rest_day, parse_rotation
 
@@ -44,6 +46,7 @@ _PAGE = (
 
 
 def test_parse_reads_the_whole_rotation() -> None:
+    """All seven days are read out of the page, each with its exercise lines."""
     rotation = parse_rotation(_PAGE)
     assert set(rotation.days) == {
         "Monday",
@@ -69,6 +72,7 @@ def test_parse_of_an_unrecognisable_page_is_empty() -> None:
 
 
 def test_projection_maps_weekday_to_workout() -> None:
+    """A date projects onto the rotation day matching its weekday, any week."""
     rotation = parse_rotation(_PAGE)
     # 2026-07-22 is a Wednesday; 07-20 a Monday; 07-19 a Sunday.
     wednesday = rotation.for_date(date(2026, 7, 22))
@@ -87,22 +91,25 @@ def test_title_drops_the_set_count() -> None:
 
 
 def test_rest_day_is_recognised() -> None:
+    """The rest-day phrase matches; ordinary exercise text does not."""
     assert is_rest_day("A Day of Rest")
     assert not is_rest_day("Pushups (2-3 Sets)")
 
 
 @respx.mock
 async def test_refresh_stores_one_document_not_dated_rows() -> None:
+    """A refresh writes exactly one cache document, holding all seven days."""
     respx.get(PAGE_URL).mock(return_value=Response(200, text=_PAGE))
     assert await refresh_hybrid_cache(force=True) is True
 
-    assert await get_hybrid_cache_collection().count_documents({}) == 1
+    assert await HybridRotationCache.find_all().count() == 1
     rotation = await read_cached_rotation()
     assert rotation is not None and len(rotation.days) == 7
 
 
 @respx.mock
 async def test_refresh_keeps_the_cached_rotation_when_upstream_fails() -> None:
+    """The site going down mid-run leaves the previously cached rotation untouched."""
     respx.get(PAGE_URL).mock(return_value=Response(200, text=_PAGE))
     await refresh_hybrid_cache(force=True)
 
@@ -126,6 +133,7 @@ async def test_refresh_keeps_the_cached_rotation_when_markup_moves() -> None:
 
 @respx.mock
 async def test_refresh_skips_when_the_rotation_is_fresh() -> None:
+    """An unforced refresh right after a fresh one is a no-op rather than a re-fetch."""
     route = respx.get(PAGE_URL).mock(return_value=Response(200, text=_PAGE))
     assert await refresh_hybrid_cache(force=True) is True
     calls = route.call_count
@@ -144,7 +152,7 @@ async def test_history_comes_from_projection_without_dated_rows() -> None:
     wods = await get_wods(14, today=date(2026, 7, 22))
     assert len(wods) == 14
     assert [w.date.isoformat() for w in wods[:3]] == ["2026-07-22", "2026-07-21", "2026-07-20"]
-    assert await get_hybrid_cache_collection().count_documents({}) == 1
+    assert await HybridRotationCache.find_all().count() == 1
 
 
 @respx.mock
@@ -154,6 +162,7 @@ async def test_repeats_and_rest_days_cost_no_model_calls(monkeypatch: pytest.Mon
     calls = 0
 
     async def counting_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
+        """A fake `parse_workout_text` that counts its own calls instead of hitting the model."""
         nonlocal calls
         calls += 1
         return Workout(name="Parsed", mode=WorkoutMode.CUSTOM, source_text=text)
@@ -175,6 +184,7 @@ async def test_repeats_and_rest_days_cost_no_model_calls(monkeypatch: pytest.Mon
 
 @respx.mock
 async def test_endpoint_returns_the_rotation(authed_client: AsyncClient) -> None:
+    """The endpoint projects the rotation onto the requested number of dates."""
     respx.get(PAGE_URL).mock(return_value=Response(200, text=_PAGE))
     response = await authed_client.get("/api/hybrid/wods?days=3")
     assert response.status_code == 200
@@ -185,4 +195,5 @@ async def test_endpoint_returns_the_rotation(authed_client: AsyncClient) -> None
 
 
 async def test_endpoint_requires_auth(client: AsyncClient) -> None:
+    """An unauthenticated request to the feed is rejected."""
     assert (await client.get("/api/hybrid/wods")).status_code == 401

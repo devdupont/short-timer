@@ -12,8 +12,6 @@ no dictionary to attack, so iterating a hash would buy nothing and slow every
 authenticated request down.
 """
 
-from __future__ import annotations
-
 import hashlib
 import secrets
 

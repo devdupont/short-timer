@@ -18,18 +18,14 @@ feed that can only answer for today drops in by having `_missing_days` return
 at most today.
 """
 
-from __future__ import annotations
-
 import logging
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 
-from shortimer.cache.db import get_concept2_cache_collection
-from shortimer.cache.parse import (
-    SOURCE_CONCEPT2,
-    find_parse,
-    mark_permanent,
-    remember_parse,
-)
+from beanie.operators import In
+
+from shortimer.cache._feed import FeedCache
+from shortimer.cache.parse import SOURCE_CONCEPT2
+from shortimer.model.feed_cache import Concept2CacheEntry
 from shortimer.service.concept2 import Concept2Wod, fetch_days
 from shortimer.service.llm import parse_workout_text
 
@@ -44,42 +40,26 @@ MIN_REFRESH_INTERVAL = timedelta(hours=12)
 REFRESH_INTERVAL_SECONDS = 24 * 60 * 60
 
 
-def _to_document(wod: Concept2Wod) -> dict[str, object]:
-    return {
-        "_id": wod.date.isoformat(),
-        "date": wod.date.isoformat(),
-        "title": wod.title,
-        "text": wod.text,
-        "url": wod.url,
-        "fetched_at": datetime.now(UTC),
-    }
+class _Cache(FeedCache[Concept2CacheEntry]):
+    """`FeedCache` bound to `Concept2CacheEntry`."""
+
+    document_model = Concept2CacheEntry
 
 
-def _from_document(doc: dict[str, object]) -> Concept2Wod:
-    return Concept2Wod(
-        date=date.fromisoformat(str(doc["date"])),
-        title=str(doc["title"]),
-        text=str(doc["text"]),
-        url=str(doc["url"]),
-    )
+def _to_wod(entry: Concept2CacheEntry) -> Concept2Wod:
+    """A cached row as the `Concept2Wod` shape callers work with."""
+    return Concept2Wod(date=entry.date, title=entry.title, text=entry.text, url=entry.url)
 
 
 async def last_refreshed_at() -> datetime | None:
     """When the cache was most recently written, if ever."""
-    doc = await get_concept2_cache_collection().find_one(sort=[("fetched_at", -1)])
-    if doc is None:
-        return None
-    fetched = doc.get("fetched_at")
-    if not isinstance(fetched, datetime):
-        return None
-    # Mongo returns naive UTC datetimes; make comparisons safe.
-    return fetched if fetched.tzinfo else fetched.replace(tzinfo=UTC)
+    return await _Cache.last_refreshed_at()
 
 
 async def read_cached_wods(days: int) -> list[Concept2Wod]:
     """Most recent `days` cached workouts, newest first."""
-    cursor = get_concept2_cache_collection().find().sort("date", -1).limit(days)
-    return [_from_document(doc) async for doc in cursor]
+    cursor = Concept2CacheEntry.find().sort("-date").limit(days)
+    return [_to_wod(entry) async for entry in cursor]
 
 
 async def _missing_days(anchor: date) -> list[date]:
@@ -88,13 +68,8 @@ async def _missing_days(anchor: date) -> list[date]:
     On a cold cache that's the whole window; on a warm one it's just today.
     """
     window = [anchor - timedelta(days=offset) for offset in range(CACHE_DAYS)]
-    collection = get_concept2_cache_collection()
-    cached = {
-        str(doc["_id"])
-        async for doc in collection.find(
-            {"_id": {"$in": [day.isoformat() for day in window]}}, {"_id": 1}
-        )
-    }
+    ids = [day.isoformat() for day in window]
+    cached = {entry.id async for entry in Concept2CacheEntry.find(In(Concept2CacheEntry.id, ids))}
     return [day for day in window if day.isoformat() not in cached]
 
 
@@ -106,11 +81,9 @@ async def refresh_concept2_cache(*, force: bool = False, today: date | None = No
     published day, and leaving them alone means a re-fetch can't invalidate a
     parse that's already been paid for.
     """
-    if not force:
-        last = await last_refreshed_at()
-        if last is not None and datetime.now(UTC) - last < MIN_REFRESH_INTERVAL:
-            logger.debug("Concept2 cache still fresh; skipping refresh.")
-            return 0
+    if not force and await _Cache.is_fresh(MIN_REFRESH_INTERVAL):
+        logger.debug("Concept2 cache still fresh; skipping refresh.")
+        return 0
 
     anchor = today or datetime.now().date()
     missing = await _missing_days(anchor)
@@ -122,10 +95,10 @@ async def refresh_concept2_cache(*, force: bool = False, today: date | None = No
         logger.warning("Concept2 returned no workouts; keeping existing cache.")
         return 0
 
-    collection = get_concept2_cache_collection()
     for wod in wods:
-        document = _to_document(wod)
-        await collection.replace_one({"_id": document["_id"]}, document, upsert=True)
+        await Concept2CacheEntry(
+            id=wod.date.isoformat(), date=wod.date, title=wod.title, text=wod.text, url=wod.url
+        ).save()
     logger.info("Cached %d new Concept2 workout(s).", len(wods))
     return len(wods)
 
@@ -142,26 +115,11 @@ async def ensure_wods_parsed(limit: int = CACHE_DAYS) -> int:
     2026-07-12. Identical text hashes to the same pool entry, so a repeat costs
     nothing at all.
     """
-    parsed = 0
-    async for doc in get_concept2_cache_collection().find().sort("date", -1).limit(limit):
-        text = str(doc.get("text") or "")
-        if not text:
-            continue
-        if await find_parse(text) is not None:
-            # Already in the pool — either a previous day with the same
-            # workout, or a user who pasted it first. Either way it's
-            # Concept2's text, so keep it off the user retention clock.
-            await mark_permanent(text, source=SOURCE_CONCEPT2)
-            continue
-        title = str(doc.get("title") or "") or None
-        try:
-            workout = await parse_workout_text(text, name_hint=title, purpose="prewarm:concept2")
-        except Exception:  # one bad day shouldn't stop the rest
-            logger.exception("Could not pre-parse Concept2 WOD %s", doc.get("date"))
-            continue
-        await remember_parse(workout, source=SOURCE_CONCEPT2)
-        parsed += 1
-
+    cursor = Concept2CacheEntry.find().sort("-date").limit(limit)
+    candidates = [(entry.text, entry.title or None) async for entry in cursor]
+    parsed = await _Cache.warm_parse_pool(
+        candidates, parse=parse_workout_text, source=SOURCE_CONCEPT2, purpose="prewarm:concept2"
+    )
     if parsed:
         logger.info("Pre-parsed %d Concept2 workout(s).", parsed)
     return parsed

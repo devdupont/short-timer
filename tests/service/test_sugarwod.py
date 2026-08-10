@@ -1,4 +1,4 @@
-"""The SugarWOD intake, and the provider registry it plugs into."""
+"""The SugarWOD intake: date windowing, response mapping, and failure handling."""
 
 from datetime import date
 
@@ -6,9 +6,8 @@ import httpx
 import pytest
 import respx
 
-from shortimer.model.gym import GymConnection, GymProvider
+from shortimer.model.gym import GymProvider
 from shortimer.service import sugarwod
-from shortimer.service.gym_providers import PROVIDERS, all_info, spec_for
 from shortimer.service.sugarwod import _windows, fetch_recent_owner_wods
 
 API = "https://api.sugarwod.com/v2/workouts"
@@ -30,6 +29,7 @@ def _payload(*workouts: dict[str, object]) -> dict[str, object]:
 
 
 def test_a_short_range_is_one_window() -> None:
+    """A range within the API's limit is a single window, not split."""
     spans = _windows(date(2026, 8, 1), date(2026, 8, 5))
     assert spans == [(date(2026, 8, 1), date(2026, 8, 5))]
 
@@ -45,12 +45,14 @@ def test_a_long_range_is_split_to_the_api_limit() -> None:
 
 
 def test_windows_cover_the_range_without_gaps_or_overlap() -> None:
+    """Every day in a long range appears in exactly one window."""
     spans = _windows(date(2026, 1, 1), date(2026, 2, 15))
     days = [d for start, end in spans for d in _each_day(start, end)]
     assert len(days) == len(set(days)) == 46
 
 
 def _each_day(start: date, end: date) -> list[date]:
+    """Every date from `start` to `end`, inclusive."""
     from datetime import timedelta
 
     return [start + timedelta(days=i) for i in range((end - start).days + 1)]
@@ -61,6 +63,7 @@ def _each_day(start: date, end: date) -> list[date]:
 
 @respx.mock
 async def test_a_workout_becomes_a_gym_wod() -> None:
+    """A JSON:API workout entry maps onto a `GymWod` with the SugarWOD provider tag."""
     respx.get(API).mock(
         return_value=httpx.Response(
             200,
@@ -89,6 +92,7 @@ async def test_the_api_key_travels_in_a_header_not_the_query_string() -> None:
 
 @respx.mock
 async def test_a_track_filter_is_passed_through_when_set() -> None:
+    """A `track_id` argument is sent as the `track_id` query param."""
     route = respx.get(API).mock(return_value=httpx.Response(200, json=_payload()))
     await fetch_recent_owner_wods(2, api_key="k", track_id="wod", today=date(2026, 8, 4))
     assert route.calls[0].request.url.params["track_id"] == "wod"
@@ -96,6 +100,7 @@ async def test_a_track_filter_is_passed_through_when_set() -> None:
 
 @respx.mock
 async def test_no_track_means_every_track() -> None:
+    """No `track_id` argument means the request has no track filter at all."""
     route = respx.get(API).mock(return_value=httpx.Response(200, json=_payload()))
     await fetch_recent_owner_wods(2, api_key="k", today=date(2026, 8, 4))
     assert "track_id" not in route.calls[0].request.url.params
@@ -119,6 +124,7 @@ async def test_the_date_is_read_however_it_is_spelled(attributes: dict[str, obje
 
 @respx.mock
 async def test_an_unreadable_date_falls_back_to_the_day_we_asked_for() -> None:
+    """A date field that fails to parse falls back to the day the window asked for."""
     respx.get(API).mock(
         return_value=httpx.Response(200, json=_payload({"description": FRAN, "date": "not-a-date"}))
     )
@@ -159,6 +165,7 @@ async def test_a_workout_in_two_tracks_appears_once() -> None:
 
 @respx.mock
 async def test_results_come_back_newest_first() -> None:
+    """Workouts returned out of order are sorted newest-first before being handed back."""
     respx.get(API).mock(
         return_value=httpx.Response(
             200,
@@ -188,18 +195,21 @@ async def test_an_upstream_failure_yields_no_workouts_rather_than_raising(
 
 @respx.mock
 async def test_a_network_error_yields_no_workouts() -> None:
+    """A connection failure to SugarWOD yields an empty list, not an exception."""
     respx.get(API).mock(side_effect=httpx.ConnectError("down"))
     assert await fetch_recent_owner_wods(3, api_key="k", today=date(2026, 8, 4)) == []
 
 
 @respx.mock
 async def test_a_non_json_body_yields_no_workouts() -> None:
+    """A 200 response that isn't valid JSON yields an empty list."""
     respx.get(API).mock(return_value=httpx.Response(200, text="<html>nope</html>"))
     assert await fetch_recent_owner_wods(3, api_key="k", today=date(2026, 8, 4)) == []
 
 
 @respx.mock
 async def test_a_workout_with_no_description_is_skipped() -> None:
+    """An entry with no description field has no text to time, so it's dropped."""
     respx.get(API).mock(
         return_value=httpx.Response(200, json=_payload({"title": "Rest", "date_int": 20260804}))
     )
@@ -223,63 +233,6 @@ async def test_one_failed_window_does_not_lose_the_other() -> None:
     respx.get(API).mock(side_effect=responses)
     wods = await fetch_recent_owner_wods(14, api_key="k", today=date(2026, 8, 4))
     assert len(wods) == 1
-
-
-# --- The registry ------------------------------------------------------------
-
-
-def test_every_provider_is_registered() -> None:
-    """A member of the enum with no spec would 500 the moment someone saved it."""
-    assert set(PROVIDERS) == set(GymProvider)
-
-
-def test_every_provider_is_offered_in_settings() -> None:
-    assert {info.provider for info in all_info()} == set(GymProvider)
-
-
-def test_a_connection_needs_its_required_fields_to_be_usable() -> None:
-    """Wodify's owner route filters on exact names, so both are mandatory."""
-    spec = spec_for(GymProvider.WODIFY_OWNER)
-    from shortimer.cache.crypto import SecretBox
-
-    bare = GymConnection(
-        provider=GymProvider.WODIFY_OWNER,
-        credential=SecretBox(ciphertext="x"),
-        enabled=True,
-    )
-    assert spec.is_usable(bare) is False
-    assert spec.is_usable(bare.model_copy(update={"location": "Main"})) is False
-    complete = bare.model_copy(update={"location": "Main", "program": "CrossFit"})
-    assert spec.is_usable(complete) is True
-
-
-def test_a_provider_with_no_required_fields_needs_only_a_credential() -> None:
-    from shortimer.cache.crypto import SecretBox
-
-    connection = GymConnection(
-        provider=GymProvider.SUGARWOD_OWNER,
-        credential=SecretBox(ciphertext="x"),
-        enabled=True,
-    )
-    assert spec_for(GymProvider.SUGARWOD_OWNER).is_usable(connection) is True
-
-
-def test_a_disabled_connection_is_never_usable() -> None:
-    from shortimer.cache.crypto import SecretBox
-
-    connection = GymConnection(
-        provider=GymProvider.SUGARWOD_OWNER,
-        credential=SecretBox(ciphertext="x"),
-        enabled=False,
-    )
-    assert spec_for(GymProvider.SUGARWOD_OWNER).is_usable(connection) is False
-
-
-def test_sugarwod_does_not_advertise_a_location_field() -> None:
-    """It scopes by track; offering a location box would just confuse people."""
-    info = spec_for(GymProvider.SUGARWOD_OWNER).info
-    assert info.location is None
-    assert info.program is not None and info.program.label == "Track"
 
 
 async def test_a_rejected_key_is_logged_even_though_it_arrives_as_a_400(

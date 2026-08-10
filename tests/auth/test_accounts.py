@@ -1,6 +1,5 @@
 """Registration, sign-in, verification and password reset, end to end."""
 
-from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -25,14 +24,8 @@ NEW_EMAIL = "newcomer@example.com"
 NEW_PASSWORD = "another-long-enough-passphrase"
 
 
-@pytest.fixture(autouse=True)
-def _clear_settings_cache() -> Generator[None]:
-    get_settings.cache_clear()
-    yield
-    get_settings.cache_clear()
-
-
 async def _invite(admin: User, email: str | None = None, role: Role = Role.USER) -> str:
+    """Mint an invite and return its raw token."""
     token, _ = await invites.create_invite(created_by=admin.id, email=email, role=role)
     return token
 
@@ -41,6 +34,7 @@ async def _invite(admin: User, email: str | None = None, role: Role = Role.USER)
 
 
 async def test_registering_without_an_invite_is_refused(client: AsyncClient) -> None:
+    """A made-up invite token is refused, and no account is created."""
     response = await client.post(
         "/api/auth/register",
         json={"invite_token": "made-up", "email": NEW_EMAIL, "password": NEW_PASSWORD},
@@ -52,6 +46,7 @@ async def test_registering_without_an_invite_is_refused(client: AsyncClient) -> 
 async def test_registering_with_an_invite_creates_an_account_and_signs_in(
     client: AsyncClient, admin_account: User
 ) -> None:
+    """A valid invite creates the account with the submitted fields and signs the client in."""
     token = await _invite(admin_account, NEW_EMAIL)
 
     response = await client.post(
@@ -103,6 +98,7 @@ async def test_an_open_code_still_has_to_verify(client: AsyncClient, admin_accou
 async def test_a_bound_invite_refuses_a_different_address(
     client: AsyncClient, admin_account: User
 ) -> None:
+    """An invite bound to one address refuses registration under a different one."""
     token = await _invite(admin_account, "invited@example.com")
     response = await client.post(
         "/api/auth/register",
@@ -113,6 +109,7 @@ async def test_a_bound_invite_refuses_a_different_address(
 
 
 async def test_an_invite_works_only_once(client: AsyncClient, admin_account: User) -> None:
+    """A second registration on an already-redeemed invite token is refused."""
     token = await _invite(admin_account, email=None)
     first = await client.post(
         "/api/auth/register",
@@ -129,6 +126,7 @@ async def test_an_invite_works_only_once(client: AsyncClient, admin_account: Use
 
 
 async def test_an_expired_invite_is_refused(client: AsyncClient, admin_account: User) -> None:
+    """An invite whose expiry has passed is refused."""
     token = await _invite(admin_account, email=None)
     await get_invites_collection().update_one(
         {}, {"$set": {"expires_at": datetime.now(UTC) - timedelta(seconds=1)}}
@@ -141,6 +139,7 @@ async def test_an_expired_invite_is_refused(client: AsyncClient, admin_account: 
 
 
 async def test_an_invite_can_grant_a_role(client: AsyncClient, admin_account: User) -> None:
+    """The role named on the invite carries through to the account it creates."""
     token = await _invite(admin_account, "staffer@example.com", role=Role.STAFF)
     await client.post(
         "/api/auth/register",
@@ -151,6 +150,7 @@ async def test_an_invite_can_grant_a_role(client: AsyncClient, admin_account: Us
 
 
 async def test_a_short_password_is_refused(client: AsyncClient, admin_account: User) -> None:
+    """A password under the minimum length is rejected, and no account is created."""
     token = await _invite(admin_account, email=None)
     response = await client.post(
         "/api/auth/register",
@@ -163,6 +163,7 @@ async def test_a_short_password_is_refused(client: AsyncClient, admin_account: U
 async def test_a_taken_address_is_refused(
     client: AsyncClient, admin_account: User, account: User
 ) -> None:
+    """Registering with an already-registered address reports a conflict."""
     token = await _invite(admin_account, email=None)
     response = await client.post(
         "/api/auth/register",
@@ -189,6 +190,7 @@ async def test_addresses_are_matched_case_insensitively(
 async def test_invite_check_reports_a_bound_address(
     client: AsyncClient, admin_account: User
 ) -> None:
+    """Checking an address-bound invite reports it valid and returns the bound address."""
     token = await _invite(admin_account, NEW_EMAIL)
     body = (await client.get("/api/auth/invite", params={"token": token})).json()
     assert body["valid"] is True
@@ -196,6 +198,7 @@ async def test_invite_check_reports_a_bound_address(
 
 
 async def test_invite_check_reports_an_open_code(client: AsyncClient, admin_account: User) -> None:
+    """Checking an open (unbound) invite reports it valid with no address."""
     token = await _invite(admin_account, email=None)
     body = (await client.get("/api/auth/invite", params={"token": token})).json()
     assert body["valid"] is True
@@ -203,6 +206,7 @@ async def test_invite_check_reports_an_open_code(client: AsyncClient, admin_acco
 
 
 async def test_invite_check_rejects_a_bad_token(client: AsyncClient) -> None:
+    """Checking a made-up token reports it invalid with a reason."""
     body = (await client.get("/api/auth/invite", params={"token": "nope"})).json()
     assert body["valid"] is False
     assert body["reason"]
@@ -212,6 +216,7 @@ async def test_invite_check_rejects_a_bad_token(client: AsyncClient) -> None:
 
 
 async def test_login_and_logout(client: AsyncClient, account: User) -> None:
+    """Logging in authenticates subsequent requests; logging out ends the session."""
     assert (
         await client.post("/api/auth/login", json={"email": TEST_EMAIL, "password": TEST_PASSWORD})
     ).status_code == 204
@@ -231,6 +236,7 @@ async def test_logout_destroys_the_session_server_side(client: AsyncClient, acco
 
 
 async def test_logout_all_ends_every_session(client: AsyncClient, account: User) -> None:
+    """Logout-everywhere ends both the calling session and one created elsewhere."""
     elsewhere = await create_session(account.id)
     await client.post("/api/auth/login", json={"email": TEST_EMAIL, "password": TEST_PASSWORD})
 
@@ -240,6 +246,7 @@ async def test_logout_all_ends_every_session(client: AsyncClient, account: User)
 
 
 async def test_a_disabled_account_cannot_sign_in(client: AsyncClient, account: User) -> None:
+    """A disabled account with the right password is refused, distinguishably from a bad password."""
     await get_users_collection().update_one({"_id": account.id}, {"$set": {"status": "disabled"}})
     response = await client.post(
         "/api/auth/login", json={"email": TEST_EMAIL, "password": TEST_PASSWORD}
@@ -265,6 +272,71 @@ async def test_login_upgrades_a_weak_hash(client: AsyncClient, account: User) ->
     assert f"m={19 * 1024}" in user.password_hash
 
 
+# --- Throttling ----------------------------------------------------------------
+
+
+async def test_repeated_bad_passwords_are_throttled(client: AsyncClient, account: User) -> None:
+    """A password is guessable without a cap on attempts."""
+    attempts = get_settings().login_attempts_per_15_min
+    statuses = [
+        (
+            await client.post("/api/auth/login", json={"email": TEST_EMAIL, "password": "wrong"})
+        ).status_code
+        for _ in range(attempts + 2)
+    ]
+    assert statuses[0] == 401  # rejected on merit
+    assert statuses[-1] == 429  # eventually refused outright
+
+
+async def test_successful_logins_do_not_consume_the_attempt_budget(
+    client: AsyncClient, account: User
+) -> None:
+    """Everyone at a gym shares one WiFi IP; they mustn't lock each other out."""
+    attempts = get_settings().login_attempts_per_15_min
+    for _ in range(attempts * 3):
+        response = await client.post(
+            "/api/auth/login", json={"email": TEST_EMAIL, "password": TEST_PASSWORD}
+        )
+        assert response.status_code == 204
+
+
+async def test_one_account_is_throttled_across_many_addresses(
+    client: AsyncClient, account: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Per-IP limits alone would let a botnet spray one account freely."""
+    monkeypatch.setenv("TRUSTED_PROXY_HOPS", "1")
+    get_settings.cache_clear()
+
+    attempts = get_settings().login_attempts_per_15_min
+    statuses = []
+    for i in range(attempts + 2):
+        # A different source address every time, so only the per-account limit
+        # can be what stops this.
+        response = await client.post(
+            "/api/auth/login",
+            json={"email": TEST_EMAIL, "password": "wrong"},
+            headers={"X-Forwarded-For": f"203.0.113.{i}, 10.0.0.1"},
+        )
+        statuses.append(response.status_code)
+
+    assert statuses[0] == 401
+    assert statuses[-1] == 429
+
+
+async def test_an_unknown_address_fails_the_same_way_as_a_wrong_password(
+    client: AsyncClient, account: User
+) -> None:
+    """Login must not tell an attacker which addresses have accounts."""
+    unknown = await client.post(
+        "/api/auth/login", json={"email": "nobody@example.com", "password": TEST_PASSWORD}
+    )
+    wrong = await client.post(
+        "/api/auth/login", json={"email": TEST_EMAIL, "password": "wrong-password"}
+    )
+    assert unknown.status_code == wrong.status_code == 401
+    assert unknown.json()["detail"] == wrong.json()["detail"]
+
+
 # --- Email verification -------------------------------------------------------
 
 
@@ -281,6 +353,7 @@ async def _token_of(kind: TokenKind) -> str | None:
 async def test_verification_marks_the_address_confirmed(
     client: AsyncClient, admin_account: User
 ) -> None:
+    """Redeeming a verification token flips the account to verified."""
     from shortimer.auth import email_tokens
 
     token = await _invite(admin_account, email=None)
@@ -299,6 +372,7 @@ async def test_verification_marks_the_address_confirmed(
 
 
 async def test_a_verification_token_works_only_once(client: AsyncClient, account: User) -> None:
+    """Redeeming a verification token twice: the second attempt is refused."""
     from shortimer.auth import email_tokens
 
     token = await email_tokens.issue(TokenKind.VERIFY, user_id=account.id, email=TEST_EMAIL)
@@ -307,6 +381,7 @@ async def test_a_verification_token_works_only_once(client: AsyncClient, account
 
 
 async def test_an_expired_verification_token_is_refused(client: AsyncClient, account: User) -> None:
+    """A verification token past its expiry is refused."""
     from shortimer.auth import email_tokens
 
     token = await email_tokens.issue(TokenKind.VERIFY, user_id=account.id, email=TEST_EMAIL)
@@ -322,6 +397,7 @@ async def test_an_expired_verification_token_is_refused(client: AsyncClient, acc
 async def test_forgot_password_says_nothing_about_who_has_an_account(
     client: AsyncClient, account: User
 ) -> None:
+    """A known and an unknown address get identical responses, but only the known one gets a token."""
     known = await client.post("/api/auth/forgot-password", json={"email": TEST_EMAIL})
     unknown = await client.post("/api/auth/forgot-password", json={"email": "nobody@example.com"})
     assert known.status_code == unknown.status_code == 204
@@ -333,6 +409,7 @@ async def test_forgot_password_says_nothing_about_who_has_an_account(
 async def test_reset_sets_the_password_and_ends_every_session(
     client: AsyncClient, account: User
 ) -> None:
+    """A completed reset changes the password and revokes every session that predates it."""
     from shortimer.auth import email_tokens
 
     stale = await create_session(account.id)
@@ -376,6 +453,7 @@ async def test_issuing_a_reset_invalidates_the_previous_one(
 
 
 async def test_an_expired_reset_token_is_refused(client: AsyncClient, account: User) -> None:
+    """A reset token past its expiry is refused."""
     from shortimer.auth import email_tokens
 
     token = await email_tokens.issue(TokenKind.RESET, user_id=account.id, email=TEST_EMAIL)
@@ -390,6 +468,7 @@ async def test_an_expired_reset_token_is_refused(client: AsyncClient, account: U
 
 
 async def test_reset_refuses_a_short_password(client: AsyncClient, account: User) -> None:
+    """A reset with a too-short new password is rejected."""
     from shortimer.auth import email_tokens
 
     token = await email_tokens.issue(TokenKind.RESET, user_id=account.id, email=TEST_EMAIL)
@@ -405,6 +484,7 @@ async def test_reset_refuses_a_short_password(client: AsyncClient, account: User
 async def test_changing_a_password_requires_the_current_one(
     authed_client: AsyncClient,
 ) -> None:
+    """A password change with the wrong current password is refused."""
     response = await authed_client.post(
         "/api/me/password",
         json={"current_password": "not-it", "new_password": NEW_PASSWORD},
@@ -415,6 +495,7 @@ async def test_changing_a_password_requires_the_current_one(
 async def test_changing_a_password_keeps_this_session_and_drops_the_rest(
     authed_client: AsyncClient, account: User
 ) -> None:
+    """Changing a password ends every other session but leaves the current one signed in."""
     elsewhere = await create_session(account.id)
 
     response = await authed_client.post(
@@ -434,6 +515,7 @@ async def test_changing_a_password_keeps_this_session_and_drops_the_rest(
 async def test_no_token_collection_stores_a_usable_token(
     client: AsyncClient, admin_account: User, account: User
 ) -> None:
+    """Invite, reset, and session tokens are all stored hashed, never in a replayable form."""
     from shortimer.auth import email_tokens
 
     invite_token = await _invite(admin_account, email=None)

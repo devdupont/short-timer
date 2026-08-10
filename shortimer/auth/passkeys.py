@@ -31,11 +31,8 @@ without typing an email first: the browser offers whichever passkey it holds
 for this site, and the credential itself tells us who its owner is.
 """
 
-from __future__ import annotations
-
 import base64
 import logging
-from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -53,10 +50,11 @@ from webauthn.helpers.structs import (
 )
 
 from shortimer.auth.tokens import hash_token, new_token
-from shortimer.cache.db import get_credentials_collection, get_webauthn_challenges_collection
+from shortimer.cache.db import get_webauthn_challenges_collection
 from shortimer.config import get_settings
 from shortimer.model.passkey import Passkey
 from shortimer.model.user import User
+from shortimer.util.time import is_expired
 
 logger = logging.getLogger(__name__)
 
@@ -106,11 +104,8 @@ async def _spend_challenge(handle: str) -> tuple[bytes, str | None]:
         raise PasskeyError("That passkey attempt has expired. Try again.")
 
     expires_at = doc.get("expires_at")
-    if isinstance(expires_at, datetime):
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=UTC)
-        if datetime.now(UTC) >= expires_at:
-            raise PasskeyError("That passkey attempt has expired. Try again.")
+    if isinstance(expires_at, datetime) and is_expired(expires_at):
+        raise PasskeyError("That passkey attempt has expired. Try again.")
 
     challenge = doc.get("challenge")
     if not isinstance(challenge, bytes):
@@ -119,22 +114,19 @@ async def _spend_challenge(handle: str) -> tuple[bytes, str | None]:
 
 
 # --- Stored credentials ------------------------------------------------------
-
-
-def _from_document(doc: dict[str, Any]) -> Passkey:
-    data = dict(doc)
-    data["id"] = data.pop("_id")
-    data.pop("public_key", None)
-    return Passkey(**data)
+# `public_key` is deliberately not a field on `Passkey` — see the model's
+# docstring — so it's written and read straight against the collection
+# rather than through the model, everywhere it's needed.
 
 
 async def list_passkeys(user_id: str) -> list[Passkey]:
-    cursor = get_credentials_collection().find({"user_id": user_id}).sort("created_at", -1)
-    return [_from_document(doc) async for doc in cursor]
+    """A user's registered passkeys, newest first."""
+    return await Passkey.find(Passkey.user_id == user_id).sort("-created_at").to_list()
 
 
 async def count_passkeys(user_id: str) -> int:
-    return int(await get_credentials_collection().count_documents({"user_id": user_id}))
+    """How many passkeys a user has registered."""
+    return await Passkey.find(Passkey.user_id == user_id).count()
 
 
 async def delete_passkey(user_id: str, credential_id: str) -> bool:
@@ -143,10 +135,10 @@ async def delete_passkey(user_id: str, credential_id: str) -> bool:
     Scoped to the owner in the query, so there's no path where a mistake reads
     one user's credential id and deletes another's.
     """
-    result = await get_credentials_collection().delete_one(
-        {"_id": credential_id, "user_id": user_id}
-    )
-    return result.deleted_count == 1
+    result = await Passkey.find_one(
+        Passkey.id == credential_id, Passkey.user_id == user_id
+    ).delete()
+    return result is not None and result.deleted_count == 1
 
 
 # --- Registration ------------------------------------------------------------
@@ -161,7 +153,7 @@ async def start_registration(user: User) -> tuple[str, str]:
     # user can't tell apart.
     existing = [
         PublicKeyCredentialDescriptor(id=webauthn.base64url_to_bytes(passkey.id))
-        async for passkey in _iter_credentials(user.id)
+        async for passkey in Passkey.find(Passkey.user_id == user.id)
     ]
 
     options = webauthn.generate_registration_options(
@@ -182,11 +174,6 @@ async def start_registration(user: User) -> tuple[str, str]:
     )
     handle = await _issue_challenge(options.challenge, user_id=user.id)
     return handle, options_to_json(options)
-
-
-async def _iter_credentials(user_id: str) -> AsyncIterator[Passkey]:
-    async for doc in get_credentials_collection().find({"user_id": user_id}):
-        yield _from_document(doc)
 
 
 async def finish_registration(
@@ -223,11 +210,10 @@ async def finish_registration(
         created_at=datetime.now(UTC),
     )
 
-    document = passkey.model_dump(mode="json")
-    document["_id"] = document.pop("id")
-    document["public_key"] = verified.credential_public_key
-    document["created_at"] = passkey.created_at
-    await get_credentials_collection().insert_one(document)
+    await passkey.insert()
+    await Passkey.get_pymongo_collection().update_one(
+        {"_id": passkey.id}, {"$set": {"public_key": verified.credential_public_key}}
+    )
     logger.info("Registered passkey %s for %s.", credential_id[:12], user.id)
     return passkey
 
@@ -259,7 +245,7 @@ async def finish_authentication(handle: str, credential: dict[str, Any]) -> str:
     if not isinstance(raw_id, str):
         raise PasskeyError("That passkey could not be verified.")
 
-    doc = await get_credentials_collection().find_one({"_id": raw_id})
+    doc = await Passkey.get_pymongo_collection().find_one({"_id": raw_id})
     if doc is None:
         raise PasskeyError("That passkey is not registered.")
 
@@ -281,9 +267,8 @@ async def finish_authentication(handle: str, credential: dict[str, Any]) -> str:
     # must never go backwards. py_webauthn enforces that above; storing the new
     # value is what keeps the check meaningful next time. Many passkeys report
     # a constant 0, and that's fine — it means "not supported", not "cloned".
-    await get_credentials_collection().update_one(
-        {"_id": raw_id},
-        {"$set": {"sign_count": verified.new_sign_count, "last_used_at": datetime.now(UTC)}},
+    await Passkey.find_one(Passkey.id == raw_id).update(
+        {"$set": {"sign_count": verified.new_sign_count, "last_used_at": datetime.now(UTC)}}
     )
 
     user_id = doc.get("user_id")

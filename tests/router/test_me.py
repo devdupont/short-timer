@@ -1,36 +1,30 @@
-from collections.abc import Awaitable, Callable, Generator
+"""`/api/me`: reading the caller's account and writing their gym connections/credentials."""
+
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import pytest
 from httpx import AsyncClient
 
 from shortimer.cache import crypto
-from shortimer.cache.crypto import decrypt, generate_key
+from shortimer.cache.crypto import decrypt
 from shortimer.cache.db import get_users_collection
 from shortimer.config import get_settings
 from shortimer.model.gym import GymProvider
 from shortimer.model.user import User
 from shortimer.users import get_user
 
+#: Most of these tests store credentials, which needs an encryption key.
+pytestmark = pytest.mark.usefixtures("secrets_configured")
 
-@pytest.fixture(autouse=True)
-def _secrets_configured(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
-    """Most of these tests store credentials, which needs an encryption key."""
-    monkeypatch.setenv("SECRETS_KEYS", generate_key())
-    get_settings.cache_clear()
-    crypto._cipher.cache_clear()
-    yield
-    get_settings.cache_clear()
-    crypto._cipher.cache_clear()
-
-
-# Session mechanics moved to the database; they're covered in test_auth.py.
+# Session mechanics moved to the database; they're covered in auth/test_session.py.
 
 
 # --- /api/me -----------------------------------------------------------------
 
 
 async def test_me_requires_auth(client: AsyncClient) -> None:
+    """An unauthenticated request to `/api/me` is rejected."""
     assert (await client.get("/api/me")).status_code == 401
 
 
@@ -45,6 +39,7 @@ def _connection(config: dict[str, Any], provider: str) -> dict[str, Any] | None:
 
 
 async def test_me_returns_empty_config_initially(authed_client: AsyncClient, account: User) -> None:
+    """A brand-new account has no gym connections at all, not a set of blank ones."""
     response = await authed_client.get("/api/me")
     assert response.status_code == 200
     body = response.json()
@@ -55,6 +50,7 @@ async def test_me_returns_empty_config_initially(authed_client: AsyncClient, acc
 
 
 async def test_config_update_stores_and_masks_credential(authed_client: AsyncClient) -> None:
+    """Writing a gym credential stores it and the response carries only its masked form."""
     response = await authed_client.put(
         "/api/me/config",
         json={
@@ -77,6 +73,7 @@ async def test_config_update_stores_and_masks_credential(authed_client: AsyncCli
 
 
 async def test_credential_is_never_returned_in_full(authed_client: AsyncClient) -> None:
+    """The plaintext credential never appears anywhere in a subsequent `/api/me` read."""
     secret = "wodify-secret-key-9876"
     await authed_client.put(
         "/api/me/config", json={"gyms": {"wodify_owner": {"credential": secret}}}
@@ -86,6 +83,7 @@ async def test_credential_is_never_returned_in_full(authed_client: AsyncClient) 
 
 
 async def test_credential_is_encrypted_at_rest(authed_client: AsyncClient, account: User) -> None:
+    """The stored document has no plaintext credential, but the server can still decrypt it."""
     secret = "wodify-secret-key-9876"
     await authed_client.put(
         "/api/me/config", json={"gyms": {"wodify_owner": {"credential": secret}}}
@@ -121,6 +119,7 @@ async def test_omitted_credential_is_left_alone(authed_client: AsyncClient) -> N
 
 
 async def test_empty_string_clears_credential(authed_client: AsyncClient) -> None:
+    """Submitting an empty-string credential, with nothing else set, drops the connection entirely."""
     await authed_client.put(
         "/api/me/config",
         json={"gyms": {"wodify_owner": {"credential": "wodify-secret-key-9876"}}},
@@ -213,6 +212,7 @@ async def test_config_is_scoped_to_the_session_user(
 async def test_saving_credential_without_keys_reports_unavailable(
     authed_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """With no encryption keys configured, saving a credential 503s and `/api/me` says so."""
     monkeypatch.setenv("SECRETS_KEYS", "")
     get_settings.cache_clear()
     crypto._cipher.cache_clear()

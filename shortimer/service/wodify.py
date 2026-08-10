@@ -22,16 +22,14 @@ key — hence `_first_str`, which tolerates a couple of plausible spellings
 rather than hard-failing on the first surprise.
 """
 
-from __future__ import annotations
-
-import asyncio
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date
 from typing import Any
 
 import httpx
 
 from shortimer.model.gym import GymProvider, GymWod
+from shortimer.service._window import fetch_window, recent_dates
 from shortimer.util.html_text import extract_text
 
 logger = logging.getLogger(__name__)
@@ -81,6 +79,7 @@ def _unwrap_wod(payload: Any) -> dict[str, Any]:
 
 
 def _default_title(day: date) -> str:
+    """A fallback title when Wodify doesn't supply one."""
     return day.strftime("%A %y%m%d")
 
 
@@ -201,16 +200,15 @@ async def fetch_member_wod(
 async def fetch_recent_owner_wods(
     days: int, *, api_key: str, location: str, program: str, today: date | None = None
 ) -> list[GymWod]:
-    anchor = today or datetime.now().date()
-    targets = [anchor - timedelta(days=offset) for offset in range(max(1, days))]
-    async with httpx.AsyncClient(follow_redirects=True) as client:
-        results = await asyncio.gather(
-            *(
-                fetch_owner_wod(client, day, api_key=api_key, location=location, program=program)
-                for day in targets
-            )
+    """The last `days` owner-route workouts, newest first, skipping any that fail."""
+
+    async def _fetch(client: httpx.AsyncClient, day: date) -> GymWod | None:
+        """`fetch_owner_wod` closed over this call's credential and scope."""
+        return await fetch_owner_wod(
+            client, day, api_key=api_key, location=location, program=program
         )
-    return [wod for wod in results if wod is not None]
+
+    return await fetch_window(recent_dates(days, today=today), _fetch)
 
 
 async def fetch_recent_member_wods(
@@ -221,19 +219,12 @@ async def fetch_recent_member_wods(
     program: str = "",
     today: date | None = None,
 ) -> list[GymWod]:
-    anchor = today or datetime.now().date()
-    targets = [anchor - timedelta(days=offset) for offset in range(max(1, days))]
-    async with httpx.AsyncClient(follow_redirects=True) as client:
-        results = await asyncio.gather(
-            *(
-                fetch_member_wod(
-                    client,
-                    day,
-                    whiteboard_key=whiteboard_key,
-                    location=location,
-                    program=program,
-                )
-                for day in targets
-            )
+    """The last `days` public-whiteboard workouts, newest first, skipping any that fail."""
+
+    async def _fetch(client: httpx.AsyncClient, day: date) -> GymWod | None:
+        """`fetch_member_wod` closed over this call's credential and scope."""
+        return await fetch_member_wod(
+            client, day, whiteboard_key=whiteboard_key, location=location, program=program
         )
-    return [wod for wod in results if wod is not None]
+
+    return await fetch_window(recent_dates(days, today=today), _fetch)

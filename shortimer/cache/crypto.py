@@ -22,8 +22,6 @@ decrypting — masking is a read of stored metadata, not a round trip through
 the cipher.
 """
 
-from __future__ import annotations
-
 import logging
 from functools import lru_cache
 
@@ -64,6 +62,7 @@ class SecretBox(BaseModel):
     hint: str = ""
 
     def masked(self) -> str:
+        """A display string that reveals only the stored hint, never the credential."""
         return f"{_MASK}{self.hint}" if self.hint else _MASK
 
 
@@ -76,6 +75,7 @@ class SecretStatus(BaseModel):
 
 @lru_cache
 def _cipher() -> MultiFernet | None:
+    """The `MultiFernet` built from `SECRETS_KEYS`, or None if none are configured."""
     keys = get_settings().secrets_keys
     if not keys:
         return None
@@ -94,6 +94,7 @@ def is_configured() -> bool:
 
 
 def _hint(plaintext: str) -> str:
+    """The last `_HINT_CHARS` of `plaintext`, or "" if it's too short to hint safely."""
     return plaintext[-_HINT_CHARS:] if len(plaintext) >= _MIN_LENGTH_FOR_HINT else ""
 
 

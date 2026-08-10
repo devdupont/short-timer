@@ -1,4 +1,4 @@
-""""""
+"""The vocabulary `metrics.py` records events in, and what a model call costs."""
 
 from dataclasses import dataclass
 from enum import StrEnum

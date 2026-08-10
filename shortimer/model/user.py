@@ -1,13 +1,16 @@
-""""""
+"""An account, its configuration, and the shapes exposed to the client for both."""
 
-import uuid
-from datetime import UTC, datetime
+from datetime import datetime
+from typing import ClassVar
 
 from pydantic import BaseModel, Field
+from pymongo import IndexModel
 
+from shortimer.model.base import MongoDocument
 from shortimer.model.feed import FeedKind, FeedPref, default_feeds
 from shortimer.model.gym import GymConnection, GymConnectionUpdate, GymConnectionView, GymProvider
 from shortimer.model.status import AccountStatus, Role
+from shortimer.util.time import utcnow
 
 # --- Users and their per-user configuration ---------------------------------
 # Access to gym programming is per-person and per-gym: a gym owner has an API
@@ -23,13 +26,13 @@ class UserConfig(BaseModel):
     feeds: list[FeedPref] = Field(default_factory=default_feeds)
 
     def connection(self, provider: GymProvider) -> GymConnection | None:
+        """This user's stored connection for `provider`, if they have one."""
         return next((c for c in self.gyms if c.provider == provider), None)
 
 
-class User(BaseModel):
+class User(MongoDocument):
     """An account. One per person; owns their workouts via `owner_id`."""
 
-    id: str = Field(default_factory=lambda: uuid.uuid4().hex)
     #: Normalised to lowercase on write (see `users.normalize_email`) so that
     #: uniqueness is a property of the index rather than of every caller
     #: remembering to fold case. Optional only while the shared passcode still
@@ -43,8 +46,18 @@ class User(BaseModel):
     status: AccountStatus = AccountStatus.ACTIVE
     display_name: str = Field(default="", max_length=200)
     config: UserConfig = Field(default_factory=UserConfig)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+    class Settings:
+        """Beanie collection name and indexes."""
+
+        name = "users"
+        indexes: ClassVar[list[IndexModel]] = [
+            # Sparse, so passkey-only accounts without an address don't
+            # collide on the unique constraint.
+            IndexModel([("email", 1)], unique=True, sparse=True),
+        ]
 
 
 class UserConfigView(BaseModel):
@@ -59,6 +72,8 @@ class UserConfigView(BaseModel):
 
 
 class MeResponse(BaseModel):
+    """What `GET /api/me` returns: the caller's own account, secrets masked."""
+
     id: str
     #: None only for the shared-passcode account, which has no email.
     email: str | None = None
@@ -72,6 +87,8 @@ class MeResponse(BaseModel):
 
 
 class UserConfigUpdate(BaseModel):
+    """A partial write to `UserConfig`. Both fields are patches, not replacements of the whole config."""
+
     #: Keyed by provider rather than a list, because a list would face the
     #: same unmergeable-position problem `feeds` has — and unlike feeds, order
     #: here isn't user-facing, so there's nothing to be gained by paying it.

@@ -32,6 +32,7 @@ async def mcp_owner(account: User, monkeypatch: pytest.MonkeyPatch) -> AsyncGene
 
 
 async def _insert(workout_id: str, name: str, owner_id: str, **fields: object) -> None:
+    """Insert a bare workout document directly, bypassing the MCP write path."""
     await get_workouts_collection().insert_one(
         {
             **Workout(name=name, mode=WorkoutMode.FOR_TIME, **fields).model_dump(mode="json"),
@@ -42,6 +43,7 @@ async def _insert(workout_id: str, name: str, owner_id: str, **fields: object) -
 
 
 async def test_search_only_sees_its_own_owners_workouts(mcp_owner: str) -> None:
+    """A name shared by two owners' workouts: search and the empty-query listing return only mine."""
     await _insert("mine", "Fran", mcp_owner)
     await _insert("theirs", "Fran", "another-user")
 
@@ -53,6 +55,7 @@ async def test_search_only_sees_its_own_owners_workouts(mcp_owner: str) -> None:
 
 
 async def test_search_by_category_is_owner_scoped_too(mcp_owner: str) -> None:
+    """A category filter shared by two owners still returns only mine."""
     await _insert("mine", "Cindy", mcp_owner, category="girls")
     await _insert("theirs", "Not Mine", "another-user", category="girls")
 
@@ -60,6 +63,7 @@ async def test_search_by_category_is_owner_scoped_too(mcp_owner: str) -> None:
 
 
 async def test_search_treats_the_query_literally(mcp_owner: str) -> None:
+    """Regex metacharacters in the query match themselves rather than being interpreted."""
     await _insert("mine", "5+ rounds", mcp_owner)
 
     assert [doc["id"] for doc in await search_workouts(query="5+")] == ["mine"]
@@ -67,6 +71,7 @@ async def test_search_treats_the_query_literally(mcp_owner: str) -> None:
 
 
 async def test_get_workout_refuses_another_owners_id() -> None:
+    """Fetching a real workout id that belongs to a different owner returns None, not the row."""
     await _insert("theirs", "Not Mine", "another-user")
 
     assert await get_workout("theirs") is None
@@ -106,6 +111,7 @@ async def test_created_workout_can_count_its_sets_up() -> None:
 
 
 async def test_created_workouts_count_down_by_default() -> None:
+    """Omitting `interval_clock` yields the count-down default."""
     created = await create_timer_workout(name="Chelsea", mode="emom", segments=[])
 
     assert created["interval_clock"] == "count_down"

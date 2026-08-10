@@ -10,8 +10,6 @@ learn from a spent token, and a row that can't be presented twice is easier to
 reason about than one whose validity depends on remembering to check a flag.
 """
 
-from __future__ import annotations
-
 import logging
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -19,16 +17,20 @@ from enum import StrEnum
 from shortimer.auth.tokens import hash_token, new_token
 from shortimer.cache.db import get_email_tokens_collection
 from shortimer.config import get_settings
+from shortimer.util.time import is_expired
 
 logger = logging.getLogger(__name__)
 
 
 class TokenKind(StrEnum):
+    """Which of the two email flows a token belongs to. Each gets its own TTL and collection filter."""
+
     VERIFY = "verify"
     RESET = "reset"
 
 
 def _ttl(kind: TokenKind) -> timedelta:
+    """How long a freshly issued token of this kind stays valid."""
     settings = get_settings()
     if kind is TokenKind.RESET:
         return timedelta(minutes=settings.reset_ttl_minutes)
@@ -73,12 +75,7 @@ async def redeem(kind: TokenKind, token: str) -> str | None:
         return None
 
     expires_at = doc.get("expires_at")
-    if isinstance(expires_at, datetime):
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=UTC)
-        if datetime.now(UTC) >= expires_at:
-            return None
-    else:
+    if not isinstance(expires_at, datetime) or is_expired(expires_at):
         return None
 
     user_id = doc.get("user_id")
