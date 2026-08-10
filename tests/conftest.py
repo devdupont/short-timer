@@ -2,25 +2,27 @@ import os
 
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-anthropic-key")
 os.environ.setdefault("MONGODB_URI", "mongodb://localhost:27017")
-os.environ.setdefault("MONGODB_DB_NAME", "short_timer_test")
+os.environ.setdefault("MONGODB_DB_NAME", "shortimer_test")
 os.environ.setdefault("SESSION_COOKIE_SECURE", "false")
 # Sending is off, so the flows that email a token log it instead. Every test
 # that needs a token reads it from the database rather than an inbox.
 os.environ.setdefault("EMAIL_ENABLED", "false")
 
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Any
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 from mongomock_motor import AsyncMongoMockClient
 
-from short_timer import db as db_module
-from short_timer import llm as llm_module
-from short_timer.app import app
-from short_timer.auth import SESSION_COOKIE_NAME
-from short_timer.models import Role, User
-from short_timer.sessions import create_session
-from short_timer.users import create_user
+from shortimer.app import app
+from shortimer.auth.session import SESSION_COOKIE_NAME
+from shortimer.cache import db as db_module
+from shortimer.cache.session import create_session
+from shortimer.model.status import Role
+from shortimer.model.user import User
+from shortimer.service import llm as llm_module
+from shortimer.users import create_user
 
 #: The account `authed_client` signs in as. Long enough to clear the minimum.
 TEST_EMAIL = "athlete@example.com"
@@ -37,7 +39,7 @@ async def _mock_mongo(monkeypatch: pytest.MonkeyPatch) -> None:
     both succeeding, so a suite without it would pass while production
     accumulated duplicate accounts.
     """
-    client = AsyncMongoMockClient()
+    client: AsyncMongoMockClient[Any] = AsyncMongoMockClient()
     monkeypatch.setattr(db_module, "get_client", lambda: client)
     await db_module.ensure_indexes()
 
@@ -54,7 +56,7 @@ def _fresh_anthropic_client() -> None:
 
 
 @pytest.fixture
-async def client():
+async def client() -> AsyncIterator[AsyncClient]:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
@@ -98,14 +100,20 @@ def sign_in_as() -> Callable[[AsyncClient, str], Awaitable[str]]:
 
 
 @pytest.fixture
-async def authed_client(client: AsyncClient, account: User, sign_in_as) -> AsyncClient:
+async def authed_client(
+    client: AsyncClient, account: User, sign_in_as: Callable[[AsyncClient, str], Awaitable[str]]
+) -> AsyncClient:
     """A client signed in as `account`."""
     await sign_in_as(client, account.id)
     return client
 
 
 @pytest.fixture
-async def admin_client(client: AsyncClient, admin_account: User, sign_in_as) -> AsyncClient:
+async def admin_client(
+    client: AsyncClient,
+    admin_account: User,
+    sign_in_as: Callable[[AsyncClient, str], Awaitable[str]],
+) -> AsyncClient:
     """A client signed in as `admin_account`."""
     await sign_in_as(client, admin_account.id)
     return client

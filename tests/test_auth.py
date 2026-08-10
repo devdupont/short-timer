@@ -1,20 +1,21 @@
+from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from short_timer.config import get_settings
-from short_timer.db import get_sessions_collection
-from short_timer.sessions import (
-    _hash,
+from shortimer.auth.tokens import hash_token
+from shortimer.cache.db import get_sessions_collection
+from shortimer.cache.session import (
     create_session,
     resolve_session,
     revoke_all_sessions,
     revoke_session,
 )
+from shortimer.config import get_settings
 
 
 @pytest.fixture(autouse=True)
-def _clear_settings_cache() -> None:
+def _clear_settings_cache() -> Generator[None]:
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
@@ -28,20 +29,20 @@ def _clear_settings_cache() -> None:
 
 
 def test_cookie_takes_the_host_prefix_when_secure(monkeypatch: pytest.MonkeyPatch) -> None:
-    from short_timer.auth import _cookie_name
+    from shortimer.auth.session import _cookie_name
 
     monkeypatch.setenv("SESSION_COOKIE_SECURE", "true")
     get_settings.cache_clear()
-    assert _cookie_name() == "__Host-short_timer_session"
+    assert _cookie_name() == "__Host-shortimer_session"
 
 
 def test_cookie_drops_the_prefix_for_plain_http(monkeypatch: pytest.MonkeyPatch) -> None:
     """`__Host-` mandates Secure, which local http dev can't set."""
-    from short_timer.auth import _cookie_name
+    from shortimer.auth.session import _cookie_name
 
     monkeypatch.setenv("SESSION_COOKIE_SECURE", "false")
     get_settings.cache_clear()
-    assert _cookie_name() == "short_timer_session"
+    assert _cookie_name() == "shortimer_session"
 
 
 # --- Sessions ----------------------------------------------------------------
@@ -63,7 +64,7 @@ async def test_token_is_never_stored_in_the_clear() -> None:
     doc = await get_sessions_collection().find_one({"user_id": "someone"})
     assert doc is not None
     assert doc["_id"] != token
-    assert doc["_id"] == _hash(token)
+    assert doc["_id"] == hash_token(token)
     # The raw token appears nowhere in the stored document.
     assert token not in str(doc)
 
@@ -103,7 +104,7 @@ async def test_revoke_all_can_spare_the_current_session() -> None:
 async def test_idle_expiry_is_enforced_on_read() -> None:
     token = await create_session("someone")
     await get_sessions_collection().update_one(
-        {"_id": _hash(token)},
+        {"_id": hash_token(token)},
         {"$set": {"expires_at": datetime.now(UTC) - timedelta(seconds=1)}},
     )
     assert await resolve_session(token) is None
@@ -113,7 +114,7 @@ async def test_absolute_expiry_beats_a_fresh_idle_window() -> None:
     """A session used constantly still ends when the absolute deadline passes."""
     token = await create_session("someone")
     await get_sessions_collection().update_one(
-        {"_id": _hash(token)},
+        {"_id": hash_token(token)},
         {
             "$set": {
                 "expires_at": datetime.now(UTC) + timedelta(days=30),
@@ -127,19 +128,19 @@ async def test_absolute_expiry_beats_a_fresh_idle_window() -> None:
 async def test_expired_session_is_deleted_when_found() -> None:
     token = await create_session("someone")
     await get_sessions_collection().update_one(
-        {"_id": _hash(token)},
+        {"_id": hash_token(token)},
         {"$set": {"expires_at": datetime.now(UTC) - timedelta(seconds=1)}},
     )
 
     await resolve_session(token)
-    assert await get_sessions_collection().find_one({"_id": _hash(token)}) is None
+    assert await get_sessions_collection().find_one({"_id": hash_token(token)}) is None
 
 
 async def test_naive_stored_timestamps_are_read_as_utc() -> None:
     """PyMongo hands back naive datetimes; comparing those must not blow up."""
     token = await create_session("someone")
     await get_sessions_collection().update_one(
-        {"_id": _hash(token)},
+        {"_id": hash_token(token)},
         # No tzinfo, as a real driver read would produce.
         {"$set": {"expires_at": (datetime.now(UTC) + timedelta(days=1)).replace(tzinfo=None)}},
     )
@@ -151,12 +152,12 @@ async def test_idle_deadline_slides_forward_on_use() -> None:
     # Push the stored deadline back far enough that a touch is worth a write.
     stale = datetime.now(UTC) + timedelta(days=1)
     await get_sessions_collection().update_one(
-        {"_id": _hash(token)}, {"$set": {"expires_at": stale}}
+        {"_id": hash_token(token)}, {"$set": {"expires_at": stale}}
     )
 
     assert await resolve_session(token) == "someone"
 
-    doc = await get_sessions_collection().find_one({"_id": _hash(token)})
+    doc = await get_sessions_collection().find_one({"_id": hash_token(token)})
     assert doc is not None
     refreshed = doc["expires_at"]
     if refreshed.tzinfo is None:
@@ -168,7 +169,7 @@ async def test_idle_deadline_never_slides_past_the_absolute_one() -> None:
     token = await create_session("someone")
     cap = datetime.now(UTC) + timedelta(hours=2)
     await get_sessions_collection().update_one(
-        {"_id": _hash(token)},
+        {"_id": hash_token(token)},
         {
             "$set": {
                 "expires_at": datetime.now(UTC) + timedelta(minutes=1),
@@ -179,7 +180,7 @@ async def test_idle_deadline_never_slides_past_the_absolute_one() -> None:
 
     assert await resolve_session(token) == "someone"
 
-    doc = await get_sessions_collection().find_one({"_id": _hash(token)})
+    doc = await get_sessions_collection().find_one({"_id": hash_token(token)})
     assert doc is not None
     refreshed = doc["expires_at"]
     if refreshed.tzinfo is None:

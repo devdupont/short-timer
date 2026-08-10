@@ -1,30 +1,32 @@
 """Registration, sign-in, verification and password reset, end to end."""
 
+from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from conftest import TEST_EMAIL, TEST_PASSWORD
 from httpx import AsyncClient
 
-from short_timer import invites
-from short_timer.config import get_settings
-from short_timer.db import (
+from shortimer.auth import invites
+from shortimer.auth.email_tokens import TokenKind
+from shortimer.cache.db import (
     get_email_tokens_collection,
     get_invites_collection,
     get_sessions_collection,
     get_users_collection,
 )
-from short_timer.email_tokens import TokenKind
-from short_timer.models import Role, User
-from short_timer.sessions import create_session, resolve_session
-from short_timer.users import get_user, get_user_by_email
+from shortimer.cache.session import create_session, resolve_session
+from shortimer.config import get_settings
+from shortimer.model.status import Role
+from shortimer.model.user import User
+from shortimer.users import get_user, get_user_by_email
 
 NEW_EMAIL = "newcomer@example.com"
 NEW_PASSWORD = "another-long-enough-passphrase"
 
 
 @pytest.fixture(autouse=True)
-def _clear_settings_cache():
+def _clear_settings_cache() -> Generator[None]:
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
@@ -279,7 +281,7 @@ async def _token_of(kind: TokenKind) -> str | None:
 async def test_verification_marks_the_address_confirmed(
     client: AsyncClient, admin_account: User
 ) -> None:
-    from short_timer import email_tokens
+    from shortimer.auth import email_tokens
 
     token = await _invite(admin_account, email=None)
     await client.post(
@@ -297,7 +299,7 @@ async def test_verification_marks_the_address_confirmed(
 
 
 async def test_a_verification_token_works_only_once(client: AsyncClient, account: User) -> None:
-    from short_timer import email_tokens
+    from shortimer.auth import email_tokens
 
     token = await email_tokens.issue(TokenKind.VERIFY, user_id=account.id, email=TEST_EMAIL)
     assert (await client.post("/api/auth/verify", json={"token": token})).status_code == 200
@@ -305,7 +307,7 @@ async def test_a_verification_token_works_only_once(client: AsyncClient, account
 
 
 async def test_an_expired_verification_token_is_refused(client: AsyncClient, account: User) -> None:
-    from short_timer import email_tokens
+    from shortimer.auth import email_tokens
 
     token = await email_tokens.issue(TokenKind.VERIFY, user_id=account.id, email=TEST_EMAIL)
     await get_email_tokens_collection().update_one(
@@ -331,7 +333,7 @@ async def test_forgot_password_says_nothing_about_who_has_an_account(
 async def test_reset_sets_the_password_and_ends_every_session(
     client: AsyncClient, account: User
 ) -> None:
-    from short_timer import email_tokens
+    from shortimer.auth import email_tokens
 
     stale = await create_session(account.id)
     token = await email_tokens.issue(TokenKind.RESET, user_id=account.id, email=TEST_EMAIL)
@@ -356,7 +358,7 @@ async def test_issuing_a_reset_invalidates_the_previous_one(
     client: AsyncClient, account: User
 ) -> None:
     """Otherwise every "resend" leaves another live credential in an inbox."""
-    from short_timer import email_tokens
+    from shortimer.auth import email_tokens
 
     first = await email_tokens.issue(TokenKind.RESET, user_id=account.id, email=TEST_EMAIL)
     second = await email_tokens.issue(TokenKind.RESET, user_id=account.id, email=TEST_EMAIL)
@@ -374,7 +376,7 @@ async def test_issuing_a_reset_invalidates_the_previous_one(
 
 
 async def test_an_expired_reset_token_is_refused(client: AsyncClient, account: User) -> None:
-    from short_timer import email_tokens
+    from shortimer.auth import email_tokens
 
     token = await email_tokens.issue(TokenKind.RESET, user_id=account.id, email=TEST_EMAIL)
     await get_email_tokens_collection().update_one(
@@ -388,7 +390,7 @@ async def test_an_expired_reset_token_is_refused(client: AsyncClient, account: U
 
 
 async def test_reset_refuses_a_short_password(client: AsyncClient, account: User) -> None:
-    from short_timer import email_tokens
+    from shortimer.auth import email_tokens
 
     token = await email_tokens.issue(TokenKind.RESET, user_id=account.id, email=TEST_EMAIL)
     response = await client.post(
@@ -432,7 +434,7 @@ async def test_changing_a_password_keeps_this_session_and_drops_the_rest(
 async def test_no_token_collection_stores_a_usable_token(
     client: AsyncClient, admin_account: User, account: User
 ) -> None:
-    from short_timer import email_tokens
+    from shortimer.auth import email_tokens
 
     invite_token = await _invite(admin_account, email=None)
     reset_token = await email_tokens.issue(TokenKind.RESET, user_id=account.id, email=TEST_EMAIL)

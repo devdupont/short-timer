@@ -1,7 +1,7 @@
 from argon2 import PasswordHasher
 
-from short_timer import passwords
-from short_timer.passwords import hash_password, needs_rehash, verify_password
+from shortimer.auth import passwords
+from shortimer.auth.passwords import hash_password, needs_rehash, verify_password
 
 
 def test_hash_then_verify() -> None:

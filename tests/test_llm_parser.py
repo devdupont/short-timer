@@ -19,8 +19,8 @@ from typing import Any
 
 import pytest
 
-from short_timer import llm
-from short_timer.models import IntervalClock, WorkoutMode
+from shortimer.model.workout import IntervalClock, WorkoutMode
+from shortimer.service import llm
 
 FIXTURES_PATH = Path(__file__).parent / "fixtures" / "workouts.json"
 FIXTURES: list[dict[str, Any]] = json.loads(FIXTURES_PATH.read_text())

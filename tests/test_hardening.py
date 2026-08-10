@@ -1,17 +1,22 @@
+from collections.abc import Awaitable, Callable, Generator
+
 import anthropic
 import httpx
 import pytest
 from conftest import TEST_EMAIL, TEST_PASSWORD
 from httpx import ASGITransport, AsyncClient
 
-from short_timer.app import app
-from short_timer.config import get_settings
-from short_timer.models import User, Workout, WorkoutMode
-from short_timer.ratelimit import RateLimit, enforce
+from shortimer.app import app
+from shortimer.config import get_settings
+from shortimer.model.user import User
+from shortimer.model.workout import Workout, WorkoutMode
+from shortimer.util.ratelimit import RateLimit, enforce
+
+SignInAs = Callable[[AsyncClient, str], Awaitable[str]]
 
 
 @pytest.fixture(autouse=True)
-def _clear_settings_cache():
+def _clear_settings_cache() -> Generator[None]:
     """Settings are cached; drop it so per-test env tweaks take effect."""
     get_settings.cache_clear()
     yield
@@ -107,7 +112,7 @@ async def test_oversized_paste_is_rejected_before_the_model(
     async def exploding_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
         raise AssertionError("oversized input must be rejected before parsing")
 
-    monkeypatch.setattr("short_timer.routers.workouts.parse_workout_text", exploding_parse)
+    monkeypatch.setattr("shortimer.router.workouts.parse_workout_text", exploding_parse)
 
     response = await authed_client.post("/api/workouts/parse", json={"text": "x" * 20_001})
     assert response.status_code == 422
@@ -138,14 +143,14 @@ async def test_upstream_failures_map_to_useful_statuses(
     error: Exception,
     expected_status: int,
     account: User,
-    sign_in_as,
+    sign_in_as: SignInAs,
 ) -> None:
     """A parser outage should be a clear, retryable answer — not a bare 500."""
 
     async def failing_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
         raise error
 
-    monkeypatch.setattr("short_timer.routers.workouts.parse_workout_text", failing_parse)
+    monkeypatch.setattr("shortimer.router.workouts.parse_workout_text", failing_parse)
 
     transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as raw:
@@ -161,12 +166,12 @@ async def test_upstream_failures_map_to_useful_statuses(
 async def test_unexpected_errors_do_not_leak_internals(
     monkeypatch: pytest.MonkeyPatch,
     account: User,
-    sign_in_as,
+    sign_in_as: SignInAs,
 ) -> None:
     async def boom(text: str, name_hint: str | None = None, **_: object) -> Workout:
         raise RuntimeError("secret internal detail: connection string xyz")
 
-    monkeypatch.setattr("short_timer.routers.workouts.parse_workout_text", boom)
+    monkeypatch.setattr("shortimer.router.workouts.parse_workout_text", boom)
 
     transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as raw:
@@ -193,7 +198,7 @@ async def test_seeded_workout_model_still_round_trips() -> None:
 async def test_unexpected_errors_still_carry_cors_headers(
     monkeypatch: pytest.MonkeyPatch,
     account: User,
-    sign_in_as,
+    sign_in_as: SignInAs,
 ) -> None:
     """A 500 the browser can't read is a 500 the user never sees.
 
@@ -207,7 +212,7 @@ async def test_unexpected_errors_still_carry_cors_headers(
     async def boom(text: str, name_hint: str | None = None, **_: object) -> Workout:
         raise RuntimeError("kaboom")
 
-    monkeypatch.setattr("short_timer.routers.workouts.parse_workout_text", boom)
+    monkeypatch.setattr("shortimer.router.workouts.parse_workout_text", boom)
 
     origin = get_settings().cors_origins[0]
     transport = ASGITransport(app=app, raise_app_exceptions=False)

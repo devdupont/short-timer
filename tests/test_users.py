@@ -1,16 +1,20 @@
+from collections.abc import Awaitable, Callable, Generator
+from typing import Any
+
 import pytest
 from httpx import AsyncClient
 
-from short_timer import crypto
-from short_timer.config import get_settings
-from short_timer.crypto import decrypt, generate_key
-from short_timer.db import get_users_collection
-from short_timer.models import GymProvider, User
-from short_timer.users import get_user
+from shortimer.cache import crypto
+from shortimer.cache.crypto import decrypt, generate_key
+from shortimer.cache.db import get_users_collection
+from shortimer.config import get_settings
+from shortimer.model.gym import GymProvider
+from shortimer.model.user import User
+from shortimer.users import get_user
 
 
 @pytest.fixture(autouse=True)
-def _secrets_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+def _secrets_configured(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
     """Most of these tests store credentials, which needs an encryption key."""
     monkeypatch.setenv("SECRETS_KEYS", generate_key())
     get_settings.cache_clear()
@@ -30,7 +34,7 @@ async def test_me_requires_auth(client: AsyncClient) -> None:
     assert (await client.get("/api/me")).status_code == 401
 
 
-def _connection(config: dict, provider: str) -> dict | None:
+def _connection(config: dict[str, Any], provider: str) -> dict[str, Any] | None:
     """One provider's stored connection out of the config payload.
 
     `gyms` is a list rather than a map because it only ever holds the providers
@@ -183,13 +187,15 @@ async def test_an_unknown_provider_is_rejected(authed_client: AsyncClient) -> No
     assert response.status_code == 422
 
 
-async def test_config_is_scoped_to_the_session_user(authed_client: AsyncClient, sign_in_as) -> None:
+async def test_config_is_scoped_to_the_session_user(
+    authed_client: AsyncClient, sign_in_as: Callable[[AsyncClient, str], Awaitable[str]]
+) -> None:
     """Another user's session must not see this user's credentials."""
     await authed_client.put(
         "/api/me/config",
         json={"gyms": {"wodify_owner": {"credential": "wodify-secret-key-9876"}}},
     )
-    from short_timer.models import User
+    from shortimer.model.user import User
 
     other = User(id="someone-else", display_name="Other")
     doc = other.model_dump(mode="json")

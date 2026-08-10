@@ -1,6 +1,6 @@
-# short-timer web
+# shortimer web
 
-React + Vite + TypeScript frontend for short-timer. See the [root
+React + Vite + TypeScript frontend for shortimer. See the [root
 README](../README.md) for the full setup (backend, MongoDB, env vars).
 
 ```bash

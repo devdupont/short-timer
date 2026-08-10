@@ -5,17 +5,17 @@ import pytest
 import respx
 from httpx import AsyncClient, Response
 
-from short_timer import crossfit
-from short_timer.crossfit import fetch_wod
-from short_timer.models import Workout, WorkoutMode
-from short_timer.parse_cache import find_parse
-from short_timer.wod_cache import (
+from shortimer.cache.crossfit import (
     CACHE_DAYS,
     ensure_wods_parsed,
     get_wods,
     read_cached_wods,
     refresh_wod_cache,
 )
+from shortimer.cache.parse import find_parse
+from shortimer.model.workout import Workout, WorkoutMode
+from shortimer.service import crossfit
+from shortimer.service.crossfit import fetch_wod
 
 _WOD_JSON = {
     "wods": {
@@ -70,7 +70,7 @@ async def test_wods_are_parsed_once_and_shared(monkeypatch: pytest.MonkeyPatch) 
         calls += 1
         return Workout(name="Parsed", mode=WorkoutMode.FOR_TIME, source_text=text)
 
-    monkeypatch.setattr("short_timer.wod_cache.parse_workout_text", counting_parse)
+    monkeypatch.setattr("shortimer.cache.crossfit.parse_workout_text", counting_parse)
 
     await refresh_wod_cache(force=True)
     assert await ensure_wods_parsed() > 0
@@ -99,7 +99,7 @@ async def test_rest_days_are_not_parsed(monkeypatch: pytest.MonkeyPatch) -> None
     async def exploding_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
         raise AssertionError("rest days have no workout to parse")
 
-    monkeypatch.setattr("short_timer.wod_cache.parse_workout_text", exploding_parse)
+    monkeypatch.setattr("shortimer.cache.crossfit.parse_workout_text", exploding_parse)
 
     await refresh_wod_cache(force=True)
     assert await ensure_wods_parsed() == 0
@@ -119,7 +119,7 @@ async def test_refetch_preserves_parse_but_stale_text_invalidates_it(
         calls += 1
         return Workout(name="Parsed", mode=WorkoutMode.FOR_TIME, source_text=text)
 
-    monkeypatch.setattr("short_timer.wod_cache.parse_workout_text", counting_parse)
+    monkeypatch.setattr("shortimer.cache.crossfit.parse_workout_text", counting_parse)
 
     await refresh_wod_cache(force=True)
     await ensure_wods_parsed()

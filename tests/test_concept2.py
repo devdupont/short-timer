@@ -5,18 +5,18 @@ import pytest
 import respx
 from httpx import AsyncClient, Response
 
-from short_timer import concept2
-from short_timer.concept2 import fetch_wod, parse_wod_page
-from short_timer.concept2_cache import (
+from shortimer.cache.concept2 import (
     CACHE_DAYS,
     ensure_wods_parsed,
     get_wods,
     read_cached_wods,
     refresh_concept2_cache,
 )
-from short_timer.db import get_concept2_cache_collection
-from short_timer.models import Workout, WorkoutMode
-from short_timer.parse_cache import find_parse
+from shortimer.cache.db import get_concept2_cache_collection
+from shortimer.cache.parse import find_parse
+from shortimer.model.workout import Workout, WorkoutMode
+from shortimer.service import concept2
+from shortimer.service.concept2 import fetch_wod, parse_wod_page
 
 
 def _page(title: str, description: str | None = "Seven alternating intervals.") -> str:
@@ -148,7 +148,7 @@ async def test_a_repeated_workout_is_only_parsed_once(monkeypatch: pytest.Monkey
         calls += 1
         return Workout(name="Parsed", mode=WorkoutMode.INTERVAL, source_text=text)
 
-    monkeypatch.setattr("short_timer.concept2_cache.parse_workout_text", counting_parse)
+    monkeypatch.setattr("shortimer.cache.concept2.parse_workout_text", counting_parse)
 
     # Every cached day carries the same workout text, so one parse covers them all.
     await refresh_concept2_cache(force=True, today=date(2026, 7, 22))

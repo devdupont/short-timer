@@ -1,7 +1,7 @@
 # Accounts
 
 How identity works, and why it's built this way. The code is in
-`src/short_timer/auth.py` (sessions), `users.py` (records and roles),
+`shortimer/auth.py` (sessions), `users.py` (records and roles),
 `invites.py`, `email_tokens.py`, `passwords.py` and `routers/auth.py`.
 
 ## The shape of it
@@ -45,7 +45,7 @@ growing without bound.
 
 ## The cookie
 
-`__Host-short_timer_session` in production, `short_timer_session` in plain-http
+`__Host-shortimer_session` in production, `shortimer_session` in plain-http
 local dev (the prefix mandates `Secure`, which http can't set). The prefix
 matters here: a browser refuses such a cookie if it carries a `Domain`
 attribute, which stops anything else under `shortimer.com` from planting a

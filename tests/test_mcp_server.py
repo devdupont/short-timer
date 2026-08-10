@@ -1,16 +1,20 @@
 """The MCP server acts on one owner's library, not the whole collection."""
 
+from collections.abc import AsyncGenerator
+
 import pytest
 
-from short_timer import api_tokens
-from short_timer.config import get_settings
-from short_timer.db import get_workouts_collection
-from short_timer.mcp_server import create_timer_workout, get_workout, search_workouts
-from short_timer.models import ApiTokenScope, User, Workout, WorkoutMode
+from shortimer.auth import api_tokens
+from shortimer.cache.db import get_workouts_collection
+from shortimer.config import get_settings
+from shortimer.mcp_server import create_timer_workout, get_workout, search_workouts
+from shortimer.model.token import ApiTokenScope
+from shortimer.model.user import User
+from shortimer.model.workout import Workout, WorkoutMode
 
 
 @pytest.fixture(autouse=True)
-async def mcp_owner(account: User, monkeypatch: pytest.MonkeyPatch) -> str:
+async def mcp_owner(account: User, monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[str]:
     """Point the server at an account by issuing it a token.
 
     The owner comes from the token now, not from configuration, so becoming

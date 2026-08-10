@@ -1,20 +1,24 @@
 """Per-user API tokens, and the MCP server that authenticates with one."""
 
+from collections.abc import Generator
+
 import pytest
 from conftest import TEST_PASSWORD
 from httpx import AsyncClient
 
-from short_timer import api_tokens, mcp_server
-from short_timer.config import get_settings
-from short_timer.db import get_api_tokens_collection
-from short_timer.models import ApiTokenScope, User
+from shortimer import mcp_server
+from shortimer.auth import api_tokens
+from shortimer.cache.db import get_api_tokens_collection
+from shortimer.config import get_settings
+from shortimer.model.token import ApiTokenScope
+from shortimer.model.user import User
 
 READ = [ApiTokenScope.LIBRARY_READ]
 BOTH = [ApiTokenScope.LIBRARY_READ, ApiTokenScope.LIBRARY_WRITE]
 
 
 @pytest.fixture(autouse=True)
-def _clear_settings_cache():
+def _clear_settings_cache() -> Generator[None]:
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
@@ -163,7 +167,7 @@ async def test_a_written_workout_belongs_to_the_tokens_owner(
 
     created = await mcp_server.create_timer_workout(name="Fran", mode="for_time", segments=[])
 
-    from short_timer.db import get_workouts_collection
+    from shortimer.cache.db import get_workouts_collection
 
     doc = await get_workouts_collection().find_one({"_id": created["id"]})
     assert doc is not None and doc["owner_id"] == account.id
@@ -172,8 +176,8 @@ async def test_a_written_workout_belongs_to_the_tokens_owner(
 async def test_reads_never_cross_owners(
     account: User, admin_account: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from short_timer.db import get_workouts_collection
-    from short_timer.models import Workout, WorkoutMode
+    from shortimer.cache.db import get_workouts_collection
+    from shortimer.model.workout import Workout, WorkoutMode
 
     for owner, workout_id in ((account.id, "mine"), (admin_account.id, "theirs")):
         await get_workouts_collection().insert_one(

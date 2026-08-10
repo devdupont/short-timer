@@ -4,14 +4,14 @@ import pytest
 from conftest import TEST_EMAIL
 from httpx import AsyncClient
 
-from short_timer.dedup import source_hash
-from short_timer.models import (
+from shortimer.model.user import User
+from shortimer.model.workout import (
     Movement,
-    User,
     Workout,
     WorkoutMode,
     WorkoutSegment,
 )
+from shortimer.util.dedup import source_hash
 
 
 def _fran() -> Workout:
@@ -78,7 +78,7 @@ async def test_parse_endpoint_uses_llm_parser(
     async def fake_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
         return _fran().model_copy(update={"source_text": text})
 
-    monkeypatch.setattr("short_timer.routers.workouts.parse_workout_text", fake_parse)
+    monkeypatch.setattr("shortimer.router.workouts.parse_workout_text", fake_parse)
 
     response = await authed_client.post("/api/workouts/parse", json={"text": "21-15-9 Fran"})
     assert response.status_code == 200
@@ -121,7 +121,7 @@ async def test_parse_reuses_saved_workout_without_calling_llm(
     async def exploding_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
         raise AssertionError("LLM should not be called for a cached workout")
 
-    monkeypatch.setattr("short_timer.routers.workouts.parse_workout_text", exploding_parse)
+    monkeypatch.setattr("shortimer.router.workouts.parse_workout_text", exploding_parse)
 
     response = await authed_client.post("/api/workouts/parse", json={"text": text})
     assert response.status_code == 200
@@ -132,7 +132,7 @@ async def test_another_owners_workout_is_invisible(
     authed_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Every read/write path is owner-scoped, ready for real accounts."""
-    from short_timer.db import get_workouts_collection
+    from shortimer.cache.db import get_workouts_collection
 
     text = "Someone else's workout\n21-15-9"
     await get_workouts_collection().insert_one(
@@ -158,7 +158,7 @@ async def test_another_owners_workout_is_invisible(
     async def fake_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
         return _fran().model_copy(update={"source_text": text})
 
-    monkeypatch.setattr("short_timer.routers.workouts.parse_workout_text", fake_parse)
+    monkeypatch.setattr("shortimer.router.workouts.parse_workout_text", fake_parse)
 
     parsed = await authed_client.post("/api/workouts/parse", json={"text": text})
     assert parsed.status_code == 200
@@ -169,7 +169,7 @@ async def test_loading_a_prewarmed_wod_costs_no_llm_call(
     authed_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A WOD parsed by the daily task is copied, not re-parsed, per user."""
-    from short_timer.parse_cache import remember_parse
+    from shortimer.cache.parse import remember_parse
 
     text = "50-40-30-20-10 reps for time of:\nDouble-unders\nSit-ups"
     # What the daily background task leaves behind in the shared pool.
@@ -178,7 +178,7 @@ async def test_loading_a_prewarmed_wod_costs_no_llm_call(
     async def exploding_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
         raise AssertionError("a pre-parsed WOD must not hit the model")
 
-    monkeypatch.setattr("short_timer.routers.workouts.parse_workout_text", exploding_parse)
+    monkeypatch.setattr("shortimer.router.workouts.parse_workout_text", exploding_parse)
 
     saved = await authed_client.post("/api/workouts/from-text", json={"text": text})
     assert saved.status_code == 201
@@ -195,8 +195,8 @@ async def test_parse_is_shared_across_owners(
     authed_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """One user's parse spares every other user the same LLM call."""
-    from short_timer.app import app as fastapi_app
-    from short_timer.auth import current_owner
+    from shortimer.app import app as fastapi_app
+    from shortimer.auth.session import current_owner
 
     calls = 0
 
@@ -205,7 +205,7 @@ async def test_parse_is_shared_across_owners(
         calls += 1
         return _fran().model_copy(update={"source_text": text})
 
-    monkeypatch.setattr("short_timer.routers.workouts.parse_workout_text", counting_parse)
+    monkeypatch.setattr("shortimer.router.workouts.parse_workout_text", counting_parse)
 
     text = "Helen\n3 rounds for time:\n400m run\n21 kettlebell swings\n12 pull-ups"
     first = await authed_client.post("/api/workouts/from-text", json={"text": text})
@@ -228,13 +228,13 @@ async def test_one_owners_edits_do_not_leak_to_another(
     authed_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The pool shares the neutral parse, never a user's customizations."""
-    from short_timer.app import app as fastapi_app
-    from short_timer.auth import current_owner
+    from shortimer.app import app as fastapi_app
+    from shortimer.auth.session import current_owner
 
     async def fake_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
         return _fran().model_copy(update={"source_text": text})
 
-    monkeypatch.setattr("short_timer.routers.workouts.parse_workout_text", fake_parse)
+    monkeypatch.setattr("shortimer.router.workouts.parse_workout_text", fake_parse)
 
     text = "Murph\nFor time:\n1 mile run\n100 pull-ups"
     created = await authed_client.post("/api/workouts/from-text", json={"text": text})
@@ -282,7 +282,7 @@ async def test_from_text_creates_then_caches(
         calls += 1
         return _fran().model_copy(update={"source_text": text})
 
-    monkeypatch.setattr("short_timer.routers.workouts.parse_workout_text", counting_parse)
+    monkeypatch.setattr("shortimer.router.workouts.parse_workout_text", counting_parse)
 
     text = "Fran\n21-15-9 thrusters and pull-ups"
     first = await authed_client.post("/api/workouts/from-text", json={"text": text})
@@ -342,7 +342,7 @@ async def test_list_pages_newest_first(authed_client: AsyncClient) -> None:
     [{"limit": 0}, {"limit": 101}, {"offset": -1}, {"q": "x" * 201}],
 )
 async def test_list_rejects_out_of_range_paging(
-    authed_client: AsyncClient, params: dict[str, object]
+    authed_client: AsyncClient, params: dict[str, int | str]
 ) -> None:
     response = await authed_client.get("/api/workouts", params=params)
     assert response.status_code == 422
@@ -437,7 +437,7 @@ async def test_list_rejects_an_unknown_mode(authed_client: AsyncClient) -> None:
 
 
 async def test_categories_lists_this_owners_categories_only(authed_client: AsyncClient) -> None:
-    from short_timer.db import get_workouts_collection
+    from shortimer.cache.db import get_workouts_collection
 
     await _save(authed_client, _dated("Fran", 1, category="benchmark"))
     await _save(authed_client, _dated("Grace", 2, category="girls"))

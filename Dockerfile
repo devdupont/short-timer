@@ -22,7 +22,7 @@ COPY pyproject.toml uv.lock README.md ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-dev
 
-COPY src ./src
+COPY shortimer ./shortimer
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
@@ -35,4 +35,4 @@ EXPOSE 8000
 # --proxy-headers makes request.client the real caller rather than the ingress
 # proxy. Trusting all forwarders is safe only because the container is not
 # routable except through Container Apps' ingress.
-CMD ["sh", "-c", "exec uvicorn short_timer.app:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*'"]
+CMD ["sh", "-c", "exec uvicorn shortimer.app:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*'"]

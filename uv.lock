@@ -1353,7 +1353,7 @@ wheels = [
 ]
 
 [[package]]
-name = "short-timer"
+name = "shortimer"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

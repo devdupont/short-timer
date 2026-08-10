@@ -1,14 +1,16 @@
 """Invite administration, and who is allowed to reach it."""
 
+import pytest
 import respx
 from conftest import TEST_EMAIL
 from httpx import ASGITransport, AsyncClient, Response
 
-from short_timer import invites
-from short_timer.app import app
-from short_timer.config import get_settings
-from short_timer.db import get_users_collection
-from short_timer.models import Role, User
+from shortimer.app import app
+from shortimer.auth import invites
+from shortimer.cache.db import get_users_collection
+from shortimer.config import get_settings
+from shortimer.model.status import Role
+from shortimer.model.user import User
 
 POSTMARK = "https://api.postmarkapp.com/email"
 
@@ -138,7 +140,9 @@ async def test_the_user_list_never_carries_a_password_hash(
 
 
 @respx.mock
-async def test_an_addressed_invite_is_emailed(admin_client: AsyncClient, monkeypatch) -> None:
+async def test_an_addressed_invite_is_emailed(
+    admin_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("EMAIL_ENABLED", "true")
     monkeypatch.setenv("POSTMARK_SERVER_TOKEN", "test-token")
     get_settings.cache_clear()
@@ -155,7 +159,9 @@ async def test_an_addressed_invite_is_emailed(admin_client: AsyncClient, monkeyp
 
 
 @respx.mock
-async def test_a_failed_send_still_returns_the_link(admin_client: AsyncClient, monkeypatch) -> None:
+async def test_a_failed_send_still_returns_the_link(
+    admin_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The invite exists; the admin can pass the link on by hand."""
     monkeypatch.setenv("EMAIL_ENABLED", "true")
     monkeypatch.setenv("POSTMARK_SERVER_TOKEN", "test-token")

@@ -1,21 +1,20 @@
 """Event recording, pricing, and the two aggregation endpoints."""
 
-from typing import ClassVar
+from collections.abc import Generator
+from typing import ClassVar, NoReturn
 
 import pytest
 from conftest import TEST_EMAIL, TEST_PASSWORD
 from httpx import AsyncClient
 
-from short_timer.config import get_settings
-from short_timer.db import (
+from shortimer.cache.db import (
     get_events_collection,
     get_users_collection,
     get_workouts_collection,
 )
-from short_timer.metrics import (
+from shortimer.config import get_settings
+from shortimer.metrics import (
     MODEL_PRICES,
-    EventType,
-    ParseOutcome,
     estimate_cost,
     model_spend,
     parse_breakdown,
@@ -24,12 +23,15 @@ from short_timer.metrics import (
     record_model_call,
     record_parse,
 )
-from short_timer.models import Role, User, Workout, WorkoutMode
-from short_timer.users import get_user
+from shortimer.model.metric import EventType, ParseOutcome
+from shortimer.model.status import Role
+from shortimer.model.user import User
+from shortimer.model.workout import Workout, WorkoutMode
+from shortimer.users import get_user
 
 
 @pytest.fixture(autouse=True)
-def _clear_settings_cache():
+def _clear_settings_cache() -> Generator[None]:
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
@@ -50,10 +52,10 @@ async def test_an_event_is_stored_with_its_type_and_owner() -> None:
 async def test_recording_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     """A lost metric must not cost a request the user already paid for."""
 
-    def exploding_collection():
+    def exploding_collection() -> NoReturn:
         raise RuntimeError("database on fire")
 
-    monkeypatch.setattr("short_timer.metrics.get_events_collection", exploding_collection)
+    monkeypatch.setattr("shortimer.metrics.get_events_collection", exploding_collection)
     # No exception, and nothing recorded — the caller carries on regardless.
     await record(EventType.PARSE, outcome="model_call")
 
@@ -344,7 +346,7 @@ async def test_a_parse_records_both_the_outcome_and_the_tokens(
     class FakeClient:
         messages = FakeMessages()
 
-    monkeypatch.setattr("short_timer.llm._client", lambda: FakeClient())
+    monkeypatch.setattr("shortimer.service.llm._client", lambda: FakeClient())
 
     response = await authed_client.post("/api/workouts/parse", json={"text": "Fran 21-15-9"})
     assert response.status_code == 200
@@ -363,7 +365,7 @@ async def test_a_cached_parse_costs_nothing_and_says_so(
     authed_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The parse pool's whole value proposition, as a measurable event."""
-    from short_timer.parse_cache import remember_parse
+    from shortimer.cache.parse import remember_parse
 
     text = "21-15-9 Thrusters and Pull-ups"
     await remember_parse(Workout(name="Fran", mode=WorkoutMode.FOR_TIME, source_text=text))
@@ -371,7 +373,7 @@ async def test_a_cached_parse_costs_nothing_and_says_so(
     async def exploding_parse(*_: object, **__: object) -> Workout:
         raise AssertionError("the pool should have served this")
 
-    monkeypatch.setattr("short_timer.routers.workouts.parse_workout_text", exploding_parse)
+    monkeypatch.setattr("shortimer.router.workouts.parse_workout_text", exploding_parse)
 
     assert (await authed_client.post("/api/workouts/parse", json={"text": text})).status_code == 200
 

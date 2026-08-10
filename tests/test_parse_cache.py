@@ -1,9 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
-from short_timer.db import get_parse_cache_collection
-from short_timer.dedup import source_hash
-from short_timer.models import Workout, WorkoutMode
-from short_timer.parse_cache import (
+from shortimer.cache.db import get_parse_cache_collection
+from shortimer.cache.parse import (
     SOURCE_CROSSFIT,
     SOURCE_USER,
     USER_RETENTION,
@@ -12,6 +10,8 @@ from short_timer.parse_cache import (
     prune_expired_parses,
     remember_parse,
 )
+from shortimer.model.workout import Workout, WorkoutMode
+from shortimer.util.dedup import source_hash
 
 CROSSFIT_TEXT = "50-40-30-20-10 reps for time of:\nDouble-unders\nSit-ups"
 USER_TEXT = "Coach's whiteboard special\n3 rounds:\n10 burpees"

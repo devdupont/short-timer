@@ -1,4 +1,4 @@
-from short_timer.models import (
+from shortimer.model.workout import (
     IntervalClock,
     Movement,
     Workout,

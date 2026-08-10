@@ -6,20 +6,21 @@ degrade to an empty feed rather than an exception, and the cache key — which i
 the one thing here that would be a security bug if it were wrong.
 """
 
+from collections.abc import AsyncIterator
 from datetime import date
 
 import httpx
 import pytest
 import respx
 
-from short_timer.gym_cache import gym_fingerprint
-from short_timer.html_text import extract_text
-from short_timer.models import GymProvider
-from short_timer.wodify import (
+from shortimer.cache.gym import gym_fingerprint
+from shortimer.model.gym import GymProvider
+from shortimer.service.wodify import (
     fetch_member_wod,
     fetch_owner_wod,
     fetch_recent_member_wods,
 )
+from shortimer.util.html_text import extract_text
 
 PROGRAM_API = "https://api.wodify.com/v1/workouts/formattedworkout"
 WHITEBOARD = "https://app.wodify.com/Performance/PublicWhiteboard.aspx"
@@ -51,7 +52,7 @@ DAY = date(2026, 7, 20)
 
 
 @pytest.fixture
-async def client():
+async def client() -> AsyncIterator[httpx.AsyncClient]:
     async with httpx.AsyncClient(follow_redirects=True) as ac:
         yield ac
 

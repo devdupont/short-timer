@@ -8,21 +8,25 @@ tested by faking the verification result, which is the only way to exercise
 them without a real authenticator.
 """
 
+from collections.abc import Awaitable, Callable, Generator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 from conftest import TEST_PASSWORD
 from httpx import AsyncClient
 
-from short_timer import passkeys
-from short_timer.config import get_settings
-from short_timer.db import get_credentials_collection, get_webauthn_challenges_collection
-from short_timer.models import User
+from shortimer.auth import passkeys
+from shortimer.cache.db import get_credentials_collection, get_webauthn_challenges_collection
+from shortimer.config import get_settings
+from shortimer.model.user import User
+
+SignInAs = Callable[[AsyncClient, str], Awaitable[str]]
 
 
 @pytest.fixture(autouse=True)
-def _clear_settings_cache():
+def _clear_settings_cache() -> Generator[None]:
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
@@ -43,7 +47,7 @@ class FakeAuthentication:
     credential_backed_up: bool = True
 
 
-def _credential(raw_id: str = "Y3JlZGVudGlhbC1vbmU") -> dict:
+def _credential(raw_id: str = "Y3JlZGVudGlhbC1vbmU") -> dict[str, Any]:
     """The shape the browser posts back. Contents are irrelevant when the
     verification itself is stubbed; only `rawId` is read by our code."""
     return {"id": raw_id, "rawId": raw_id, "response": {}, "type": "public-key"}
@@ -51,7 +55,7 @@ def _credential(raw_id: str = "Y3JlZGVudGlhbC1vbmU") -> dict:
 
 async def _register(
     client: AsyncClient, monkeypatch: pytest.MonkeyPatch, credential_id: bytes = b"credential-one"
-) -> dict:
+) -> dict[str, Any]:
     """Run a full registration with verification stubbed out."""
     monkeypatch.setattr(
         passkeys.webauthn,
@@ -68,7 +72,7 @@ async def _register(
         },
     )
     assert response.status_code == 200, response.text
-    return response.json()
+    return response.json()  # type: ignore[no-any-return]
 
 
 # --- Challenges ---------------------------------------------------------------
@@ -146,7 +150,10 @@ async def test_an_expired_challenge_is_refused(
 
 
 async def test_a_challenge_is_bound_to_the_account_that_asked(
-    authed_client: AsyncClient, admin_account: User, sign_in_as, monkeypatch: pytest.MonkeyPatch
+    authed_client: AsyncClient,
+    admin_account: User,
+    sign_in_as: SignInAs,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Otherwise one account could finish another's registration."""
     monkeypatch.setattr(
@@ -211,7 +218,7 @@ async def test_a_second_registration_excludes_the_first(
 
 
 async def test_a_verified_assertion_signs_the_owner_in(
-    client: AsyncClient, account: User, sign_in_as, monkeypatch: pytest.MonkeyPatch
+    client: AsyncClient, account: User, sign_in_as: SignInAs, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await sign_in_as(client, account.id)
     registered = await _register(client, monkeypatch)
@@ -251,7 +258,7 @@ async def test_an_unregistered_credential_is_refused(
 
 
 async def test_the_sign_counter_is_advanced(
-    client: AsyncClient, account: User, sign_in_as, monkeypatch: pytest.MonkeyPatch
+    client: AsyncClient, account: User, sign_in_as: SignInAs, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Storing it is what keeps the clone check meaningful next time."""
     await sign_in_as(client, account.id)
@@ -279,9 +286,9 @@ async def test_the_sign_counter_is_advanced(
 
 
 async def test_a_disabled_account_cannot_sign_in_with_a_passkey(
-    client: AsyncClient, account: User, sign_in_as, monkeypatch: pytest.MonkeyPatch
+    client: AsyncClient, account: User, sign_in_as: SignInAs, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from short_timer.db import get_users_collection
+    from shortimer.cache.db import get_users_collection
 
     await sign_in_as(client, account.id)
     registered = await _register(client, monkeypatch)
@@ -314,7 +321,11 @@ async def test_deleting_a_passkey_removes_it(
 
 
 async def test_you_cannot_delete_someone_elses_passkey(
-    client: AsyncClient, account: User, admin_account: User, sign_in_as, monkeypatch
+    client: AsyncClient,
+    account: User,
+    admin_account: User,
+    sign_in_as: SignInAs,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     await sign_in_as(client, account.id)
     registered = await _register(client, monkeypatch)
@@ -325,7 +336,11 @@ async def test_you_cannot_delete_someone_elses_passkey(
 
 
 async def test_the_listing_is_scoped_to_the_caller(
-    client: AsyncClient, account: User, admin_account: User, sign_in_as, monkeypatch
+    client: AsyncClient,
+    account: User,
+    admin_account: User,
+    sign_in_as: SignInAs,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     await sign_in_as(client, account.id)
     await _register(client, monkeypatch)
@@ -364,7 +379,7 @@ async def test_registering_a_passkey_does_not_replace_the_password(
     """A passkey on a lost phone still needs a way back in."""
     await _register(authed_client, monkeypatch)
 
-    from short_timer.users import get_user
+    from shortimer.users import get_user
 
     user = await get_user(account.id)
     assert user is not None and user.password_hash is not None

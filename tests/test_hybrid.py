@@ -4,16 +4,16 @@ import pytest
 import respx
 from httpx import AsyncClient, Response
 
-from short_timer.db import get_hybrid_cache_collection
-from short_timer.hybrid import PAGE_URL, is_rest_day, parse_rotation
-from short_timer.hybrid_cache import (
+from shortimer.cache.db import get_hybrid_cache_collection
+from shortimer.cache.hybrid import (
     ensure_wods_parsed,
     get_wods,
     read_cached_rotation,
     refresh_hybrid_cache,
 )
-from short_timer.models import Workout, WorkoutMode
-from short_timer.parse_cache import find_parse
+from shortimer.cache.parse import find_parse
+from shortimer.model.workout import Workout, WorkoutMode
+from shortimer.service.hybrid import PAGE_URL, is_rest_day, parse_rotation
 
 
 def _day_block(day: str, *exercises: str) -> str:
@@ -71,15 +71,19 @@ def test_parse_of_an_unrecognisable_page_is_empty() -> None:
 def test_projection_maps_weekday_to_workout() -> None:
     rotation = parse_rotation(_PAGE)
     # 2026-07-22 is a Wednesday; 07-20 a Monday; 07-19 a Sunday.
-    assert rotation.for_date(date(2026, 7, 22)).title == "Bridges & Twists"
-    assert rotation.for_date(date(2026, 7, 20)).title == "Pushups & Leg Raises"
-    assert rotation.for_date(date(2026, 7, 19)).title == "A Day of Rest"
+    wednesday = rotation.for_date(date(2026, 7, 22))
+    monday = rotation.for_date(date(2026, 7, 20))
+    sunday = rotation.for_date(date(2026, 7, 19))
+    assert wednesday is not None and wednesday.title == "Bridges & Twists"
+    assert monday is not None and monday.title == "Pushups & Leg Raises"
+    assert sunday is not None and sunday.title == "A Day of Rest"
 
 
 def test_title_drops_the_set_count() -> None:
     """The card heading should read as a workout name, not a prescription."""
     rotation = parse_rotation(_PAGE)
-    assert rotation.for_date(date(2026, 7, 21)).title == "Pullups & Squats"
+    thursday = rotation.for_date(date(2026, 7, 21))
+    assert thursday is not None and thursday.title == "Pullups & Squats"
 
 
 def test_rest_day_is_recognised() -> None:
@@ -154,7 +158,7 @@ async def test_repeats_and_rest_days_cost_no_model_calls(monkeypatch: pytest.Mon
         calls += 1
         return Workout(name="Parsed", mode=WorkoutMode.CUSTOM, source_text=text)
 
-    monkeypatch.setattr("short_timer.hybrid_cache.parse_workout_text", counting_parse)
+    monkeypatch.setattr("shortimer.cache.hybrid.parse_workout_text", counting_parse)
 
     await refresh_hybrid_cache(force=True)
     assert await ensure_wods_parsed() == 3

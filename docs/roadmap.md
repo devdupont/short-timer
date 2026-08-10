@@ -7,7 +7,7 @@ so the next person doesn't have to re-derive it.
 ## Cursor paging, once a listing stops being single-owner
 
 `GET /api/workouts` pages with `limit`/`offset` (see
-`src/short_timer/routers/workouts.py`). That's the right trade for a personal
+`shortimer/routers/workouts.py`). That's the right trade for a personal
 library: it's cheap, it gives an exact `total`, and it can jump to page 5.
 Its known weakness is drift — a workout saved while you're reading page 2
 shifts every later row down one, so you see a duplicate on page 3 and a
@@ -42,7 +42,7 @@ independently of the workouts it points at is the multi-writer case above.
 
 ## Shareable lists and workouts
 
-The precedent to read first is `src/short_timer/parse_cache.py`. Its docstring
+The precedent to read first is `shortimer/parse_cache.py`. Its docstring
 already works through the copy-vs-share question for parses and lands on
 copy: a shared record would push one user's renames and time caps onto
 everyone else who pasted the same text, so the pool holds only the neutral

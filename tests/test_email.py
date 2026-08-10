@@ -1,18 +1,20 @@
 """The Postmark sender, and the messages built for it."""
 
+from collections.abc import Generator
+
 import httpx
 import pytest
 import respx
 from httpx import Response
 
-from short_timer import email as email_module
-from short_timer.config import get_settings
+from shortimer.config import get_settings
+from shortimer.util import email as email_module
 
 POSTMARK = "https://api.postmarkapp.com/email"
 
 
 @pytest.fixture(autouse=True)
-def _clear_settings_cache():
+def _clear_settings_cache() -> Generator[None]:
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

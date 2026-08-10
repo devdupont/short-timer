@@ -6,10 +6,10 @@ import httpx
 import pytest
 import respx
 
-from short_timer import sugarwod
-from short_timer.gym_providers import PROVIDERS, all_info, spec_for
-from short_timer.models import GymConnection, GymProvider
-from short_timer.sugarwod import _windows, fetch_recent_owner_wods
+from shortimer.model.gym import GymConnection, GymProvider
+from shortimer.service import sugarwod
+from shortimer.service.gym_providers import PROVIDERS, all_info, spec_for
+from shortimer.service.sugarwod import _windows, fetch_recent_owner_wods
 
 API = "https://api.sugarwod.com/v2/workouts"
 
@@ -240,7 +240,7 @@ def test_every_provider_is_offered_in_settings() -> None:
 def test_a_connection_needs_its_required_fields_to_be_usable() -> None:
     """Wodify's owner route filters on exact names, so both are mandatory."""
     spec = spec_for(GymProvider.WODIFY_OWNER)
-    from short_timer.crypto import SecretBox
+    from shortimer.cache.crypto import SecretBox
 
     bare = GymConnection(
         provider=GymProvider.WODIFY_OWNER,
@@ -254,7 +254,7 @@ def test_a_connection_needs_its_required_fields_to_be_usable() -> None:
 
 
 def test_a_provider_with_no_required_fields_needs_only_a_credential() -> None:
-    from short_timer.crypto import SecretBox
+    from shortimer.cache.crypto import SecretBox
 
     connection = GymConnection(
         provider=GymProvider.SUGARWOD_OWNER,
@@ -265,7 +265,7 @@ def test_a_provider_with_no_required_fields_needs_only_a_credential() -> None:
 
 
 def test_a_disabled_connection_is_never_usable() -> None:
-    from short_timer.crypto import SecretBox
+    from shortimer.cache.crypto import SecretBox
 
     connection = GymConnection(
         provider=GymProvider.SUGARWOD_OWNER,

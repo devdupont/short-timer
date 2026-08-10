@@ -1,8 +1,9 @@
+from collections.abc import Generator
+
 import pytest
 
-from short_timer import crypto
-from short_timer.config import get_settings
-from short_timer.crypto import (
+from shortimer.cache import crypto
+from shortimer.cache.crypto import (
     SecretBox,
     SecretsNotConfiguredError,
     decrypt,
@@ -10,10 +11,11 @@ from short_timer.crypto import (
     generate_key,
     is_configured,
 )
+from shortimer.config import get_settings
 
 
 @pytest.fixture
-def _keys(monkeypatch: pytest.MonkeyPatch) -> str:
+def _keys(monkeypatch: pytest.MonkeyPatch) -> Generator[str]:
     """Configure a single encryption key for the duration of a test."""
     key = generate_key()
     monkeypatch.setenv("SECRETS_KEYS", key)
@@ -25,7 +27,7 @@ def _keys(monkeypatch: pytest.MonkeyPatch) -> str:
 
 
 @pytest.fixture
-def _no_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+def _no_keys(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
     monkeypatch.setenv("SECRETS_KEYS", "")
     get_settings.cache_clear()
     crypto._cipher.cache_clear()

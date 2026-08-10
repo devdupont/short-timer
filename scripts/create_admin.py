@@ -21,10 +21,10 @@ import asyncio
 import getpass
 import sys
 
-from short_timer.config import get_settings
-from short_timer.db import ensure_indexes
-from short_timer.models import Role
-from short_timer.users import EmailAlreadyRegisteredError, create_user, get_user_by_email
+from shortimer.cache.db import ensure_indexes
+from shortimer.config import get_settings
+from shortimer.model.status import Role
+from shortimer.users import EmailAlreadyRegisteredError, create_user, get_user_by_email
 
 
 async def main() -> int:

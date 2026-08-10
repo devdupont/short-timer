@@ -6,7 +6,7 @@ yet — which is not the thing it looks like from the outside.
 ## The blocker is that there is nothing to export
 
 The obvious reading is "we need a Hevy client". That's the easy half. The real
-problem is that **short-timer knows the plan, not the outcome.**
+problem is that **shortimer knows the plan, not the outcome.**
 
 It knows a workout was 21-15-9 thrusters and pull-ups, and since PR #20 it
 knows the clock started and how long it ran. It does not know how many rounds
@@ -107,7 +107,7 @@ rather than assuming a well-formed body is enough.
 
 ## The actual hard part: movement names
 
-`exercise_template_id` is Hevy's own identifier. short-timer has free text
+`exercise_template_id` is Hevy's own identifier. shortimer has free text
 ("Thrusters", "thruster 95/65 lb", "KB swings") because that's what the LLM
 parsed out of whatever the gym wrote. Bridging those is the integration.
 

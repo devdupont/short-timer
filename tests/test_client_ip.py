@@ -5,11 +5,13 @@ can influence the address we attribute a request to, they can defeat the
 login limit by varying it on every attempt.
 """
 
+from collections.abc import Generator
+
 import pytest
 from fastapi import Request
 
-from short_timer.config import get_settings
-from short_timer.ratelimit import client_ip
+from shortimer.config import get_settings
+from shortimer.util.ratelimit import client_ip
 
 
 def _request(headers: dict[str, str], peer: str = "10.0.0.9") -> Request:
@@ -24,7 +26,7 @@ def _request(headers: dict[str, str], peer: str = "10.0.0.9") -> Request:
 
 
 @pytest.fixture(autouse=True)
-def _reset_settings():
+def _reset_settings() -> Generator[None]:
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
@@ -104,5 +106,11 @@ def test_missing_platform_header_falls_through_to_forwarded_for(
 
 
 def test_no_client_and_no_headers_is_still_a_usable_key() -> None:
-    scope = {"type": "http", "method": "GET", "path": "/", "headers": [], "client": None}
+    scope: dict[str, object] = {
+        "type": "http",
+        "method": "GET",
+        "path": "/",
+        "headers": [],
+        "client": None,
+    }
     assert client_ip(Request(scope)) == "unknown"

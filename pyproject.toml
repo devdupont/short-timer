@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "short-timer"
+name = "shortimer"
 version = "0.1.0"
 description = "A programmable workout timer server: paste in a workout, get back a runnable timer."
 readme = "README.md"
@@ -43,11 +43,11 @@ dependencies = [
 ]
 
 [project.scripts]
-short-timer-server = "short_timer.app:run"
-short-timer-mcp = "short_timer.mcp_server:run"
+shortimer-server = "shortimer.app:run"
+shortimer-mcp = "shortimer.mcp_server:run"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/short_timer"]
+packages = ["shortimer"]
 
 # Dev dependencies live here rather than in the hatch env so that uv locks
 # them: CI installs the locked set (`uv sync --frozen`), which is the only way
@@ -69,9 +69,9 @@ dependency-groups = ["dev"]
 
 [tool.hatch.envs.default.scripts]
 test = "pytest {args:tests}"
-types = "mypy {args:src}"
-serve = "uvicorn short_timer.app:app --reload {args}"
-mcp = "python -m short_timer.mcp_server {args}"
+types = "mypy {args:shortimer tests}"
+serve = "uvicorn shortimer.app:app --reload {args}"
+mcp = "python -m shortimer.mcp_server {args}"
 scrape = "python scripts/scrape_workouts.py {args}"
 seed-data = "python scripts/build_benchmark_seed.py {args}"
 
@@ -79,7 +79,7 @@ seed-data = "python scripts/build_benchmark_seed.py {args}"
 plugins = ["pydantic.mypy"]
 python_version = "3.12"
 strict = true
-files = ["src"]
+files = ["shortimer"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -101,4 +101,4 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 ignore = ["E501"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["short_timer"]
+known-first-party = ["shortimer"]

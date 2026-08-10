@@ -23,7 +23,7 @@ export LOCATION=eastus
 export ENVIRONMENT=shortimer-env
 export APP=shortimer-api
 export API_HOST=api.shortimer.com
-export IMAGE=ghcr.io/devdupont/short-timer/api:latest
+export IMAGE=ghcr.io/devdupont/shortimer/api:latest
 
 az login
 az account set --subscription "<your-subscription-id>"
@@ -84,7 +84,7 @@ az containerapp update \
     PUBLIC_BASE_URL=https://shortimer.com \
     WEBAUTHN_RP_ID=shortimer.com \
     WEBAUTHN_ORIGINS=https://shortimer.com \
-    MONGODB_DB_NAME=short_timer \
+    MONGODB_DB_NAME=shortimer \
     SESSION_COOKIE_SECURE=true \
     CORS_ORIGINS=https://shortimer.com \
     TRUSTED_PROXY_HOPS=1
@@ -117,7 +117,7 @@ properties:
   template:
     containers:
       - name: shortimer-api
-        image: ghcr.io/devdupont/short-timer/api:latest
+        image: ghcr.io/devdupont/shortimer/api:latest
         probes:
           - type: Liveness
             httpGet: { path: /api/health, port: 8000 }
@@ -190,7 +190,7 @@ az role assignment create \
 az ad app federated-credential create --id "$APP_ID" --parameters '{
   "name": "github-main",
   "issuer": "https://token.actions.githubusercontent.com",
-  "subject": "repo:devdupont/short-timer:ref:refs/heads/main",
+  "subject": "repo:devdupont/shortimer:ref:refs/heads/main",
   "audiences": ["api://AzureADTokenExchange"]
 }'
 ```
@@ -204,7 +204,7 @@ opaque login failure. If you later want an approval gate, add
 az ad app federated-credential create --id "$APP_ID" --parameters '{
   "name": "github-production-env",
   "issuer": "https://token.actions.githubusercontent.com",
-  "subject": "repo:devdupont/short-timer:environment:production",
+  "subject": "repo:devdupont/shortimer:environment:production",
   "audiences": ["api://AzureADTokenExchange"]
 }'
 ```

@@ -1,27 +1,31 @@
 """The gym feed end to end: config resolution, caching, and the API."""
 
+from collections.abc import Awaitable, Callable, Generator
+
 import httpx
 import pytest
 import respx
 from httpx import AsyncClient
 
-from short_timer import crypto
-from short_timer.config import get_settings
-from short_timer.crypto import encrypt, generate_key
-from short_timer.db import (
+from shortimer.cache import crypto
+from shortimer.cache.crypto import encrypt, generate_key
+from shortimer.cache.db import (
     get_gym_cache_collection,
     get_users_collection,
     get_workouts_collection,
 )
-from short_timer.dedup import source_hash
-from short_timer.gym_cache import (
+from shortimer.cache.gym import (
     gym_fingerprint,
     read_cached,
     refresh_all_configured,
     resolve_source,
 )
-from short_timer.models import GymProvider, User, Workout, WorkoutMode
-from short_timer.users import get_user
+from shortimer.config import get_settings
+from shortimer.model.gym import GymProvider
+from shortimer.model.user import User
+from shortimer.model.workout import Workout, WorkoutMode
+from shortimer.users import get_user
+from shortimer.util.dedup import source_hash
 
 WHITEBOARD = "https://app.wodify.com/Performance/PublicWhiteboard.aspx"
 PROGRAM_API = "https://api.wodify.com/v1/workouts/formattedworkout"
@@ -34,7 +38,7 @@ BOARD_HTML = """
 
 
 @pytest.fixture(autouse=True)
-def _secrets_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+def _secrets_configured(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
     monkeypatch.setenv("SECRETS_KEYS", generate_key())
     get_settings.cache_clear()
     crypto._cipher.cache_clear()
@@ -46,13 +50,13 @@ def _secrets_configured(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture(autouse=True)
 def _no_real_llm(monkeypatch: pytest.MonkeyPatch) -> None:
     """The pre-parse would otherwise call Anthropic for every cached day."""
-    from short_timer import gym_cache
-    from short_timer.models import Workout, WorkoutMode
+    from shortimer.cache import gym
+    from shortimer.model.workout import Workout, WorkoutMode
 
     async def fake_parse(text: str, name_hint: str | None = None, **_: object) -> Workout:
         return Workout(name=name_hint or "Parsed", mode=WorkoutMode.FOR_TIME, source_text=text)
 
-    monkeypatch.setattr(gym_cache, "parse_workout_text", fake_parse)
+    monkeypatch.setattr(gym, "parse_workout_text", fake_parse)
 
 
 async def _configure(
@@ -269,7 +273,9 @@ async def test_refresh_skips_users_without_a_gym() -> None:
 
 
 async def test_feed_is_scoped_to_the_session_user(
-    authed_client: AsyncClient, sign_in_as, account: User
+    authed_client: AsyncClient,
+    sign_in_as: Callable[[AsyncClient, str], Awaitable[str]],
+    account: User,
 ) -> None:
     """Another user's session must not inherit this user's gym."""
     await _configure_member(account.id)
@@ -369,7 +375,7 @@ async def test_a_sugarwod_gym_feeds_the_home_page(
 
 async def test_two_platforms_do_not_share_a_cache_namespace() -> None:
     """Same credential string, different platform — must not collide."""
-    from short_timer.gym_cache import gym_fingerprint
+    from shortimer.cache.gym import gym_fingerprint
 
     assert gym_fingerprint("same-key", GymProvider.WODIFY_OWNER) != gym_fingerprint(
         "same-key", GymProvider.SUGARWOD_OWNER

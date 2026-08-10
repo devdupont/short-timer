@@ -1,4 +1,4 @@
-# short-timer
+# shortimer
 
 A programmable workout timer. Paste a workout from anywhere (or build one by
 hand), and the server uses an LLM to turn it into a structured, runnable
@@ -8,7 +8,7 @@ drive.
 ## Layout
 
 ```
-src/short_timer/       FastAPI server, MongoDB models, LLM parser, MCP server
+shortimer/             FastAPI server, MongoDB models, LLM parser, MCP server
 web/                   React + Vite + TypeScript frontend
 tests/                 pytest suite, including fixtures/workouts.json (a
                         curated benchmark-WOD library — Murph, Fran, Cindy, ...)
@@ -31,7 +31,7 @@ of announcing a movement nobody performs. `interval_clock` says which way the
 clock runs *inside* a leg: down by default (how long you have left to finish
 the minute), or up for sets scored by their finish time ("Every 3:00 x 5 sets,
 score = slowest set"), where athletes finish at different moments and each
-needs to read their own split. See `src/short_timer/models.py`.
+needs to read their own split. See `shortimer/models.py`.
 
 `web/src/timerPlan.ts` turns that shape into the plan the clock runs, and the
 visualizer (`WorkoutTimeline`) draws the same plan to scale — colour-coded by
@@ -70,7 +70,7 @@ to the log rather than sent — the whole signup flow works with no provider.
 hatch run test         # pytest — mocks Mongo and the Anthropic API, no network needed
 hatch check code       # ruff lint      (add --fix to apply)
 hatch check fmt        # ruff format    (add --fix to apply)
-hatch run types        # mypy --strict over src/
+hatch run types        # mypy
 ```
 
 All four should pass before a change lands. `hatch fmt` still works but is
@@ -124,7 +124,7 @@ Exposes: `parse_workout` (authoring — run pasted text through the LLM
 parser), `create_timer_workout` (authoring — save a structured workout
 directly), and `search_workouts` / `get_workout` (library — read from the
 same MongoDB collection the web app uses). See
-`src/short_timer/mcp_server.py`.
+`shortimer/mcp_server.py`.
 
 It reads and writes one owner's library. Having no session to derive that
 from, it authenticates with a per-user API token in `MCP_API_TOKEN` — mint one
