@@ -14,7 +14,6 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Generator
 from typing import Any
 
 import pytest
-from beanie import init_beanie
 from httpx import ASGITransport, AsyncClient
 from mongomock_motor import AsyncMongoMockClient, AsyncMongoMockDatabase
 
@@ -23,16 +22,7 @@ from shortimer.auth.session import SESSION_COOKIE_NAME
 from shortimer.cache import db as db_module
 from shortimer.cache.session import create_session
 from shortimer.config import get_settings
-from shortimer.model.feed_cache import (
-    Concept2CacheEntry,
-    GymCacheEntry,
-    HybridRotationCache,
-    WodCacheEntry,
-)
-from shortimer.model.passkey import Passkey
-from shortimer.model.register import Invite
 from shortimer.model.status import Role
-from shortimer.model.token import ApiToken
 from shortimer.model.user import User
 from shortimer.service import llm as llm_module
 from shortimer.users import create_user
@@ -67,19 +57,7 @@ async def _mock_mongo(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         AsyncMongoMockDatabase, "list_collection_names", _list_collection_names_compat
     )
-    await init_beanie(
-        database=db_module.get_database(),
-        document_models=[
-            User,
-            ApiToken,
-            Invite,
-            Passkey,
-            Concept2CacheEntry,
-            WodCacheEntry,
-            GymCacheEntry,
-            HybridRotationCache,
-        ],
-    )
+    await db_module.init_documents()
     await db_module.ensure_indexes()
 
 

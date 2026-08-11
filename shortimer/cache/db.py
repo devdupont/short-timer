@@ -11,13 +11,49 @@ from collections.abc import AsyncIterable
 from functools import lru_cache
 from typing import Any
 
+from beanie import Document, init_beanie
 from pymongo import AsyncMongoClient
 from pymongo.asynchronous.collection import AsyncCollection
 from pymongo.asynchronous.database import AsyncDatabase
 
 from shortimer.config import get_settings
+from shortimer.model.feed_cache import (
+    Concept2CacheEntry,
+    GymCacheEntry,
+    HybridRotationCache,
+    WodCacheEntry,
+)
+from shortimer.model.passkey import Passkey
+from shortimer.model.register import Invite
+from shortimer.model.token import ApiToken
+from shortimer.model.user import User
 
 logger = logging.getLogger(__name__)
+
+# Every Beanie document in the app. Beanie's query syntax (`User.email == ...`)
+# only works on an initialised model — an uninitialised one raises a bare
+# `AttributeError` on the field, which reads like a typo rather than a missing
+# init. Keeping the list here means the app, the tests and the scripts all
+# initialise the same set: when this lived in two places, `create_admin.py`
+# initialised none of them and broke on its first query.
+DOCUMENT_MODELS: list[type[Document]] = [
+    User,
+    ApiToken,
+    Invite,
+    Passkey,
+    Concept2CacheEntry,
+    WodCacheEntry,
+    GymCacheEntry,
+    HybridRotationCache,
+]
+
+
+async def init_documents() -> None:
+    """Bind every document model to the configured database.
+
+    Call this before touching any `Document` class, and before `ensure_indexes`.
+    """
+    await init_beanie(database=get_database(), document_models=DOCUMENT_MODELS)
 
 
 @lru_cache

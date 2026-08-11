@@ -8,6 +8,7 @@ from shortimer.auth.tokens import hash_token
 from shortimer.cache.db import get_sessions_collection
 from shortimer.cache.session import (
     create_session,
+    list_sessions,
     resolve_session,
     revoke_all_sessions,
     revoke_session,
@@ -188,3 +189,68 @@ async def test_idle_deadline_never_slides_past_the_absolute_one() -> None:
     if refreshed.tzinfo is None:
         refreshed = refreshed.replace(tzinfo=UTC)
     assert refreshed <= cap
+
+
+# --- The "signed in devices" list --------------------------------------------
+
+
+async def test_listing_sessions_returns_nothing_replayable() -> None:
+    """The screen shows where you're signed in; it must not hand out the keys.
+
+    The stored `_id` *is* the token hash, so including it — or anything derived
+    from it — would let whoever read the list revoke sessions, or worse, by an
+    identifier they were never supposed to hold.
+    """
+    token = await create_session("someone", user_agent="Firefox")
+
+    rows = await list_sessions("someone")
+
+    assert len(rows) == 1
+    assert set(rows[0]) == {"created_at", "last_seen_at", "user_agent"}
+    assert token not in str(rows)
+    assert hash_token(token) not in str(rows)
+
+
+async def test_listing_sessions_only_shows_that_user() -> None:
+    """One person's devices are not another's."""
+    await create_session("someone", user_agent="Firefox")
+    await create_session("somebody-else", user_agent="Safari")
+
+    rows = await list_sessions("someone")
+
+    assert [row["user_agent"] for row in rows] == ["Firefox"]
+
+
+async def test_listing_sessions_hides_expired_ones() -> None:
+    """An expired session is already dead; showing it invites pointless revoking.
+
+    Expiry is enforced on read rather than by a sweep (see the index comments
+    in `db.py`), so the row can still be sitting there when the list is drawn.
+    """
+    token = await create_session("someone", user_agent="Firefox")
+    await get_sessions_collection().update_one(
+        {"_id": hash_token(token)},
+        {"$set": {"expires_at": datetime.now(UTC) - timedelta(seconds=1)}},
+    )
+
+    assert await list_sessions("someone") == []
+
+
+async def test_listing_sessions_hides_a_row_with_no_expiry_at_all() -> None:
+    """A document missing `expires_at` can't be shown to be live, so it isn't.
+
+    Nothing writes such a row today. It's the safe reading of a malformed one:
+    treating "no deadline" as "never expires" would make a corrupt document the
+    most durable session in the database.
+    """
+    token = await create_session("someone", user_agent="Firefox")
+    await get_sessions_collection().update_one(
+        {"_id": hash_token(token)}, {"$unset": {"expires_at": ""}}
+    )
+
+    assert await list_sessions("someone") == []
+
+
+async def test_listing_sessions_is_empty_for_someone_with_none() -> None:
+    """No sessions is an empty list, not an error."""
+    assert await list_sessions("nobody") == []

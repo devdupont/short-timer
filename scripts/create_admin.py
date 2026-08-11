@@ -21,10 +21,18 @@ import asyncio
 import getpass
 import sys
 
-from shortimer.cache.db import ensure_indexes
+from pydantic import EmailStr, TypeAdapter, ValidationError
+
+from shortimer.cache.db import ensure_indexes, init_documents
 from shortimer.config import get_settings
 from shortimer.model.status import Role
 from shortimer.users import EmailAlreadyRegisteredError, create_user, get_user_by_email
+
+#: The same check `LoginRequest` applies. Without it this script will happily
+#: create an account at an address the login endpoint refuses — a reserved TLD
+#: like `.test` is the easy way to do it — leaving a user who exists in the
+#: database and can never sign in.
+_EMAIL = TypeAdapter(EmailStr)
 
 
 async def main() -> int:
@@ -39,6 +47,14 @@ async def main() -> int:
     )
     args = parser.parse_args()
 
+    try:
+        _EMAIL.validate_python(args.email)
+    except ValidationError as exc:
+        # One line, not pydantic's full report: the caller typed one address.
+        reason = exc.errors()[0]["msg"].removeprefix("value is not a valid email address: ")
+        print(f"{args.email} is not an address this app can accept: {reason}", file=sys.stderr)
+        return 1
+
     settings = get_settings()
     # Say which database, so an accidental run against production is visible
     # before it happens rather than after. Credentials are stripped.
@@ -47,6 +63,10 @@ async def main() -> int:
     if input("Create an account there? [y/N] ").strip().lower() != "y":
         print("Nothing was created.")
         return 1
+
+    # Bind the document models before the first query. The app does this in its
+    # lifespan, which never runs here.
+    await init_documents()
 
     if await get_user_by_email(args.email) is not None:
         print(f"{args.email} already has an account.", file=sys.stderr)

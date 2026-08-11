@@ -5,7 +5,6 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
 
-from beanie import init_beanie
 from fastapi import FastAPI, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -16,7 +15,7 @@ from shortimer.cache.crossfit import (
     ensure_wods_parsed,
     refresh_wod_cache,
 )
-from shortimer.cache.db import ensure_indexes, get_database
+from shortimer.cache.db import ensure_indexes, get_database, init_documents
 from shortimer.cache.gym import (
     REFRESH_INTERVAL_SECONDS as GYM_REFRESH_INTERVAL_SECONDS,
 )
@@ -25,16 +24,6 @@ from shortimer.cache.parse import prune_expired_parses
 from shortimer.config import get_settings
 from shortimer.errors import register_error_handlers
 from shortimer.metrics import record_feed_refresh
-from shortimer.model.feed_cache import (
-    Concept2CacheEntry,
-    GymCacheEntry,
-    HybridRotationCache,
-    WodCacheEntry,
-)
-from shortimer.model.passkey import Passkey
-from shortimer.model.register import Invite
-from shortimer.model.token import ApiToken
-from shortimer.model.user import User
 from shortimer.router import (
     admin,
     auth,
@@ -116,19 +105,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # on an empty database, so every document has been written by code that
     # sets all three.
     try:
-        await init_beanie(
-            database=get_database(),
-            document_models=[
-                User,
-                ApiToken,
-                Invite,
-                Passkey,
-                Concept2CacheEntry,
-                WodCacheEntry,
-                GymCacheEntry,
-                HybridRotationCache,
-            ],
-        )
+        await init_documents()
         await ensure_indexes()
     except Exception:  # startup maintenance is non-critical
         logger.exception("Skipped startup database maintenance.")

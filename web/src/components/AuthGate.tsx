@@ -11,33 +11,9 @@ import {
   verifyEmail,
 } from "../api";
 import { getCredential, passkeysSupported } from "../passkeys";
+import { clearUrl, readLocation } from "../authLinks";
+import type { Screen } from "../authLinks";
 import type { InviteCheck } from "../types";
-
-/**
- * Which screen the visitor lands on.
- *
- * The emailed links (`/register?token=`, `/reset?token=`, `/verify?token=`)
- * are read straight off the URL rather than routed, because this app has no
- * router — one gate that reads `location` is smaller than adding one, and
- * these are the only four addresses that exist before you're signed in.
- */
-type Screen = "login" | "register" | "forgot" | "reset" | "verify";
-
-function readLocation(): { screen: Screen; token: string | null } {
-  const params = new URLSearchParams(window.location.search);
-  const token = params.get("token");
-  const path = window.location.pathname.replace(/\/+$/, "");
-
-  if (path.endsWith("/register")) return { screen: "register", token };
-  if (path.endsWith("/reset")) return { screen: "reset", token };
-  if (path.endsWith("/verify")) return { screen: "verify", token };
-  return { screen: "login", token: null };
-}
-
-/** Drop the token from the address bar once it's been used or read. */
-function clearUrl() {
-  window.history.replaceState({}, "", "/");
-}
 
 function errorText(err: unknown): string {
   return err instanceof ApiError ? err.message : "Could not reach the server.";

@@ -33,6 +33,28 @@ class ApiError extends Error {
   }
 }
 
+/** Flatten an error body's `detail` into something renderable.
+ *
+ * Our own handlers raise `HTTPException(detail="a sentence")`, but FastAPI's
+ * request validation returns a *list* of `{loc, msg, ...}` objects. Passing
+ * that straight to `ApiError` put "[object Object]" on screen wherever a 422
+ * surfaced, which told the user nothing and hid the real complaint.
+ */
+function errorMessage(detail: unknown, fallback: string): string {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) =>
+        item && typeof item === "object" && typeof (item as { msg?: unknown }).msg === "string"
+          ? (item as { msg: string }).msg
+          : null,
+      )
+      .filter((msg): msg is string => msg !== null);
+    if (messages.length > 0) return messages.join(" ");
+  }
+  return fallback;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${BASE_URL}${path}`, {
     ...init,
@@ -42,7 +64,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    throw new ApiError(response.status, body.detail ?? response.statusText);
+    throw new ApiError(response.status, errorMessage(body.detail, response.statusText));
   }
 
   if (response.status === 204) {

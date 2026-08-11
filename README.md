@@ -41,7 +41,9 @@ the builder without starting a timer to find it.
 ## Requirements
 
 - Python 3.14 (`uv python install 3.14` if you don't have it)
-- Node 20+ for the frontend
+- Node 24 for the frontend (`nvm use` reads `.nvmrc`), which is what CI builds
+  with. Vite 8 needs at least 20.19 or 22.12 — below that it warns on every
+  build, and jsdom (which the frontend tests run in) fails to load outright.
 - A MongoDB instance (`docker compose up -d mongo` works for local dev)
 - An [Anthropic API key](https://console.anthropic.com/) for the LLM parser
 
