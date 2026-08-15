@@ -9,7 +9,7 @@ Hyrox and the exercise-catalog APIs.
 
 ## What actually qualifies
 
-short-timer turns **workout text** into a runnable clock. That makes the bar
+shortimer turns **workout text** into a runnable clock. That makes the bar
 narrower than "fitness platform with an API":
 
 - It must expose a **specific day's programming as text**, for a person who is
@@ -65,7 +65,7 @@ enough to write against, and it's the route the paying customer uses anyway
 (see `docs/pricing.md` — the gym is the buyer). The member route drops into the
 same provider slot once someone confirms its URL.
 
-> **Shipped**, as `src/short_timer/sugarwod.py` / `GymProvider.SUGARWOD_OWNER`.
+> **Shipped**, as `shortimer/sugarwod.py` / `GymProvider.SUGARWOD_OWNER`.
 >
 > **Partly verified against the live API.** `https://api.sugarwod.com/v2/workouts`
 > answers, and it distinguishes *no* key (`{"errors": {"message": "No API Key
@@ -119,7 +119,7 @@ Low priority rather than a hard no.
 (a) forbids third-party apps from displaying a user's activity data to anyone
 but that user, (b) forbids using API-obtained data to train AI models or
 similar applications, and (c) explicitly forbids operating "MCP Servers or
-agent-mediated interfaces" that expose Strava data. short-timer ships an MCP
+agent-mediated interfaces" that expose Strava data. shortimer ships an MCP
 server (`mcp_server.py`) and runs every piece of text through an LLM. Two of
 those three clauses land directly on the architecture, so even a read-only
 integration is on the wrong side of the terms. Standard-tier developers now
@@ -134,7 +134,7 @@ unusable even though nothing else about it is prohibited.
 **Wearables (Garmin, Whoop, Fitbit, Apple HealthKit, Google Health Connect)** —
 these are results-*out*, not programming-*in*. The platform-level aggregators
 (HealthKit, Health Connect) are the sensible entry point rather than per-brand
-APIs, but both need a native mobile app, which short-timer isn't. Forward-
+APIs, but both need a native mobile app, which shortimer isn't. Forward-
 looking, not next.
 
 ## The other direction: Hevy
@@ -145,7 +145,7 @@ header, key self-served from `hevy.com/settings?developer` (Hevy Pro only). It
 covers listing and fetching workouts, **creating and updating** them, routines
 and routine folders, exercise templates, and webhook subscriptions.
 
-That write path is the interesting half. It's the first way short-timer could
+That write path is the interesting half. It's the first way shortimer could
 close the "what did I score" loop — push a completed session to the athlete's
 existing log — without building and maintaining a logging product of its own.
 The Pro gate on the key means it's a feature for engaged users, which is

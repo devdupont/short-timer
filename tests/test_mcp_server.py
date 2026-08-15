@@ -1,21 +1,38 @@
 """The MCP server acts on one owner's library, not the whole collection."""
 
+from collections.abc import AsyncGenerator
+
 import pytest
 
-from short_timer.auth import DEFAULT_OWNER_ID
-from short_timer.config import get_settings
-from short_timer.db import get_workouts_collection
-from short_timer.mcp_server import create_timer_workout, get_workout, search_workouts
-from short_timer.models import Workout, WorkoutMode
+from shortimer.auth import api_tokens
+from shortimer.cache.db import get_workouts_collection
+from shortimer.config import get_settings
+from shortimer.mcp_server import create_timer_workout, get_workout, search_workouts
+from shortimer.model.token import ApiTokenScope
+from shortimer.model.user import User
+from shortimer.model.workout import Workout, WorkoutMode
 
 
 @pytest.fixture(autouse=True)
-def _fresh_settings() -> None:
-    """Drop cached settings so a test can change MCP_OWNER_ID."""
+async def mcp_owner(account: User, monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[str]:
+    """Point the server at an account by issuing it a token.
+
+    The owner comes from the token now, not from configuration, so becoming
+    somebody is minting a credential for them rather than naming them.
+    """
+    raw, _ = await api_tokens.create_token(
+        user_id=account.id,
+        name="test",
+        scopes=[ApiTokenScope.LIBRARY_READ, ApiTokenScope.LIBRARY_WRITE],
+    )
+    monkeypatch.setenv("MCP_API_TOKEN", raw)
+    get_settings.cache_clear()
+    yield account.id
     get_settings.cache_clear()
 
 
 async def _insert(workout_id: str, name: str, owner_id: str, **fields: object) -> None:
+    """Insert a bare workout document directly, bypassing the MCP write path."""
     await get_workouts_collection().insert_one(
         {
             **Workout(name=name, mode=WorkoutMode.FOR_TIME, **fields).model_dump(mode="json"),
@@ -25,8 +42,9 @@ async def _insert(workout_id: str, name: str, owner_id: str, **fields: object) -
     )
 
 
-async def test_search_only_sees_its_own_owners_workouts() -> None:
-    await _insert("mine", "Fran", DEFAULT_OWNER_ID)
+async def test_search_only_sees_its_own_owners_workouts(mcp_owner: str) -> None:
+    """A name shared by two owners' workouts: search and the empty-query listing return only mine."""
+    await _insert("mine", "Fran", mcp_owner)
     await _insert("theirs", "Fran", "another-user")
 
     results = await search_workouts(query="Fran")
@@ -36,27 +54,30 @@ async def test_search_only_sees_its_own_owners_workouts() -> None:
     assert [doc["id"] for doc in await search_workouts()] == ["mine"]
 
 
-async def test_search_by_category_is_owner_scoped_too() -> None:
-    await _insert("mine", "Cindy", DEFAULT_OWNER_ID, category="girls")
+async def test_search_by_category_is_owner_scoped_too(mcp_owner: str) -> None:
+    """A category filter shared by two owners still returns only mine."""
+    await _insert("mine", "Cindy", mcp_owner, category="girls")
     await _insert("theirs", "Not Mine", "another-user", category="girls")
 
     assert [doc["id"] for doc in await search_workouts(category="girls")] == ["mine"]
 
 
-async def test_search_treats_the_query_literally() -> None:
-    await _insert("mine", "5+ rounds", DEFAULT_OWNER_ID)
+async def test_search_treats_the_query_literally(mcp_owner: str) -> None:
+    """Regex metacharacters in the query match themselves rather than being interpreted."""
+    await _insert("mine", "5+ rounds", mcp_owner)
 
     assert [doc["id"] for doc in await search_workouts(query="5+")] == ["mine"]
     assert await search_workouts(query=".*") == []
 
 
 async def test_get_workout_refuses_another_owners_id() -> None:
+    """Fetching a real workout id that belongs to a different owner returns None, not the row."""
     await _insert("theirs", "Not Mine", "another-user")
 
     assert await get_workout("theirs") is None
 
 
-async def test_created_workouts_are_owned() -> None:
+async def test_created_workouts_are_owned(mcp_owner: str) -> None:
     """An unowned write would be invisible to the web app's library."""
     created = await create_timer_workout(
         name="Ladder",
@@ -66,22 +87,10 @@ async def test_created_workouts_are_owned() -> None:
 
     doc = await get_workouts_collection().find_one({"_id": created["id"]})
     assert doc is not None
-    assert doc["owner_id"] == DEFAULT_OWNER_ID
+    assert doc["owner_id"] == mcp_owner
 
     # ...and it comes back through the server's own read path.
     assert (await get_workout(created["id"]))["name"] == "Ladder"  # type: ignore[index]
-
-
-async def test_owner_is_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A deployment with real accounts points the server at one of them."""
-    monkeypatch.setenv("MCP_OWNER_ID", "someone-else")
-    get_settings.cache_clear()
-
-    await _insert("default-user", "Fran", DEFAULT_OWNER_ID)
-    created = await create_timer_workout(name="Fran", mode="for_time", segments=[])
-
-    assert [doc["id"] for doc in await search_workouts(query="Fran")] == [created["id"]]
-    assert await get_workout("default-user") is None
 
 
 async def test_created_workout_can_count_its_sets_up() -> None:
@@ -102,6 +111,7 @@ async def test_created_workout_can_count_its_sets_up() -> None:
 
 
 async def test_created_workouts_count_down_by_default() -> None:
+    """Omitting `interval_clock` yields the count-down default."""
     created = await create_timer_workout(name="Chelsea", mode="emom", segments=[])
 
     assert created["interval_clock"] == "count_down"

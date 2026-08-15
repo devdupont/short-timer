@@ -2,7 +2,7 @@
 """Build test fixtures from real, published workouts.
 
 This fetches a list of URLs, pulls the readable text out of each page, and
-runs it through the same LLM parser the app uses (`short_timer.llm`) to
+runs it through the same LLM parser the app uses (`shortimer.llm`) to
 produce a structured `Workout`. Results are written to
 `tests/fixtures/scraped_workouts.json` as `{name, url, source_text, workout}`
 records that new parser tests can be parametrized over.
@@ -36,10 +36,10 @@ from urllib.parse import urlparse
 
 import httpx
 
-from short_timer.html_text import extract_text
-from short_timer.llm import WorkoutParseError, parse_workout_text
+from shortimer.service.llm import WorkoutParseError, parse_workout_text
+from shortimer.util.html_text import extract_text
 
-USER_AGENT = "short-timer-fixture-scraper/0.1 (+https://github.com/devdupont/short-timer)"
+USER_AGENT = "shortimer-fixture-scraper/0.1 (+https://github.com/devdupont/shortimer)"
 FIXTURES_PATH = (
     Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "scraped_workouts.json"
 )

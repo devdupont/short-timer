@@ -1500,3 +1500,95 @@ button {
 .auth-card .primary-button {
   width: 100%;
 }
+
+/* --- Account settings ------------------------------------------------------
+   The auth screens and the account panel reuse the form styles above; these
+   are the three pieces they add. */
+
+/* A button that reads as a link: the secondary actions on the auth screens
+   ("forgot your password?", "back to sign in") shouldn't compete with the
+   submit button next to them. */
+.link-button {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  display: inline-block;
+  font: inherit;
+  font-size: 13px;
+  margin-top: 12px;
+  padding: 0;
+  text-align: left;
+  text-decoration: underline;
+}
+
+.link-button:hover {
+  color: var(--text-h);
+}
+
+.settings-section {
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 32px;
+  padding-top: 24px;
+}
+
+.settings-section h3 {
+  font-size: 14px;
+  margin: 12px 0 0;
+}
+
+.session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.session-list li {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* A user-agent string is long and arbitrary; wrap it rather than letting it
+     push the panel wide on a phone. */
+  overflow-wrap: anywhere;
+  padding: 10px 12px;
+}
+
+/* A freshly minted API token: shown once, so it has to be easy to select and
+   must not be truncated. */
+.token-value {
+  background: var(--surface-2, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+  padding: 10px 12px;
+  user-select: all;
+}
+
+.field-inline {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  font-size: 13px;
+}
+
+/* Buttons in the auth card stack full-width. `.secondary-button` is normally
+   content-sized, which left "Sign in with a passkey" visibly narrower than the
+   submit button directly above it. */
+.auth-card .primary-button,
+.auth-card .secondary-button {
+  display: block;
+  margin-top: 10px;
+  width: 100%;
+}

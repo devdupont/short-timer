@@ -1,10 +1,20 @@
 import type {
+  ApiToken,
+  ApiTokenCreated,
+  ApiTokenScope,
   Concept2WodEntry,
+  Invite,
+  InviteCheck,
+  InviteCreated,
   GymConnectionHealth,
   GymFeed,
   GymProviderInfo,
   HybridWodEntry,
   Me,
+  Passkey,
+  PasskeyChallenge,
+  Role,
+  SessionView,
   UserConfigUpdate,
   WodEntry,
   Workout,
@@ -23,6 +33,28 @@ class ApiError extends Error {
   }
 }
 
+/** Flatten an error body's `detail` into something renderable.
+ *
+ * Our own handlers raise `HTTPException(detail="a sentence")`, but FastAPI's
+ * request validation returns a *list* of `{loc, msg, ...}` objects. Passing
+ * that straight to `ApiError` put "[object Object]" on screen wherever a 422
+ * surfaced, which told the user nothing and hid the real complaint.
+ */
+function errorMessage(detail: unknown, fallback: string): string {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) =>
+        item && typeof item === "object" && typeof (item as { msg?: unknown }).msg === "string"
+          ? (item as { msg: string }).msg
+          : null,
+      )
+      .filter((msg): msg is string => msg !== null);
+    if (messages.length > 0) return messages.join(" ");
+  }
+  return fallback;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${BASE_URL}${path}`, {
     ...init,
@@ -32,7 +64,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    throw new ApiError(response.status, body.detail ?? response.statusText);
+    throw new ApiError(response.status, errorMessage(body.detail, response.statusText));
   }
 
   if (response.status === 204) {
@@ -43,12 +75,170 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export { ApiError };
 
-export function login(passcode: string): Promise<void> {
-  return request("/api/auth/login", { method: "POST", body: JSON.stringify({ passcode }) });
+export function login(email: string, password: string): Promise<void> {
+  return request("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
 }
 
 export function logout(): Promise<void> {
   return request("/api/auth/logout", { method: "POST" });
+}
+
+/** End every session for this account, including this one. */
+export function logoutEverywhere(): Promise<void> {
+  return request("/api/auth/logout-all", { method: "POST" });
+}
+
+/** Whether an invite link is usable, and which address it's bound to. */
+export function checkInvite(token: string): Promise<InviteCheck> {
+  return request(`/api/auth/invite?token=${encodeURIComponent(token)}`);
+}
+
+export function register(input: {
+  inviteToken: string;
+  email: string;
+  password: string;
+  displayName: string;
+}): Promise<void> {
+  return request("/api/auth/register", {
+    method: "POST",
+    body: JSON.stringify({
+      invite_token: input.inviteToken,
+      email: input.email,
+      password: input.password,
+      display_name: input.displayName,
+    }),
+  });
+}
+
+export function verifyEmail(token: string): Promise<Me> {
+  return request("/api/auth/verify", { method: "POST", body: JSON.stringify({ token }) });
+}
+
+export function resendVerification(): Promise<void> {
+  return request("/api/auth/resend-verification", { method: "POST" });
+}
+
+/**
+ * Always resolves, whether or not the address has an account — the server
+ * deliberately answers the same way either way, so the UI must not imply it
+ * learned anything.
+ */
+export function forgotPassword(email: string): Promise<void> {
+  return request("/api/auth/forgot-password", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export function resetPassword(token: string, password: string): Promise<void> {
+  return request("/api/auth/reset-password", {
+    method: "POST",
+    body: JSON.stringify({ token, password }),
+  });
+}
+
+export function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  return request("/api/me/password", {
+    method: "POST",
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
+}
+
+export function listSessions(): Promise<SessionView[]> {
+  return request("/api/me/sessions");
+}
+
+/** Sign out everywhere else, keeping this session. */
+export function endOtherSessions(): Promise<void> {
+  return request("/api/me/sessions", { method: "DELETE" });
+}
+
+// --- Passkeys ---------------------------------------------------------------
+
+export function passkeyRegisterChallenge(): Promise<PasskeyChallenge> {
+  return request("/api/me/passkeys/challenge", { method: "POST" });
+}
+
+export function registerPasskey(input: {
+  challengeHandle: string;
+  credential: unknown;
+  nickname: string;
+}): Promise<Passkey> {
+  return request("/api/me/passkeys", {
+    method: "POST",
+    body: JSON.stringify({
+      challenge_handle: input.challengeHandle,
+      credential: input.credential,
+      nickname: input.nickname,
+    }),
+  });
+}
+
+export function listPasskeys(): Promise<Passkey[]> {
+  return request("/api/me/passkeys");
+}
+
+export function deletePasskey(id: string): Promise<void> {
+  return request(`/api/me/passkeys/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export function passkeyLoginChallenge(): Promise<PasskeyChallenge> {
+  return request("/api/auth/passkey/challenge", { method: "POST" });
+}
+
+export function passkeyLogin(challengeHandle: string, credential: unknown): Promise<void> {
+  return request("/api/auth/passkey/login", {
+    method: "POST",
+    body: JSON.stringify({ challenge_handle: challengeHandle, credential }),
+  });
+}
+
+export function listApiTokens(): Promise<ApiToken[]> {
+  return request("/api/me/tokens");
+}
+
+/**
+ * Mints a token and returns its value — the only time it's ever visible, since
+ * the server stores only a hash. The current password is required because this
+ * credential outlives the session that created it.
+ */
+export function createApiToken(input: {
+  name: string;
+  scopes: ApiTokenScope[];
+  currentPassword: string;
+}): Promise<ApiTokenCreated> {
+  return request("/api/me/tokens", {
+    method: "POST",
+    body: JSON.stringify({
+      name: input.name,
+      scopes: input.scopes,
+      current_password: input.currentPassword,
+    }),
+  });
+}
+
+export function revokeApiToken(id: string): Promise<void> {
+  return request(`/api/me/tokens/${id}`, { method: "DELETE" });
+}
+
+// --- Admin -----------------------------------------------------------------
+
+export function listInvites(): Promise<Invite[]> {
+  return request("/api/admin/invites");
+}
+
+export function createInvite(email: string | null, role: Role): Promise<InviteCreated> {
+  return request("/api/admin/invites", {
+    method: "POST",
+    body: JSON.stringify({ email, role }),
+  });
+}
+
+export function revokeInvite(id: string): Promise<void> {
+  return request(`/api/admin/invites/${id}`, { method: "DELETE" });
 }
 
 /** The signed-in user and their config. Credentials come back masked, never in full. */

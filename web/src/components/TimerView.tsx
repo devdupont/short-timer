@@ -8,7 +8,7 @@ import type { Workout } from "../types";
 import { isUntimed, MODE_LABELS } from "../types";
 import { formatClock, movementLabel } from "../timerPlan";
 
-const MUTED_KEY = "short-timer:muted";
+const MUTED_KEY = "shortimer:muted";
 
 /**
  * Untimed sessions: work through the list and tick things off.

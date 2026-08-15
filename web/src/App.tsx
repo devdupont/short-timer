@@ -1,28 +1,70 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import "./App.css";
+import { Admin } from "./components/Admin";
+import { AuthGate } from "./components/AuthGate";
+import { hasPendingAuthLink } from "./authLinks";
 import { Home } from "./components/Home";
-import { PasscodeGate } from "./components/PasscodeGate";
 import { Settings } from "./components/Settings";
 import { TimerView } from "./components/TimerView";
 import { WorkoutBuilder } from "./components/WorkoutBuilder";
 import { WorkoutImport } from "./components/WorkoutImport";
 import { WorkoutLibrary } from "./components/WorkoutLibrary";
 import type { EditTarget } from "./components/WorkoutBuilder";
-import { logout } from "./api";
-import type { Workout } from "./types";
+import { getMe, logout } from "./api";
+import type { Role, Workout } from "./types";
 
-type Tab = "home" | "import" | "build" | "library" | "timer" | "settings";
+type Tab = "home" | "import" | "build" | "library" | "timer" | "settings" | "admin";
 
 function App() {
-  const [unlocked, setUnlocked] = useState(false);
+  // `null` means "we haven't asked yet". Without that third state the app
+  // flashes the sign-in screen on every reload, which it used to do: the
+  // session cookie was never checked at startup, so a signed-in user was
+  // asked to sign in again each time they opened the page.
+  const [signedIn, setSignedIn] = useState<boolean | null>(null);
+  // Only the role is kept, not the whole `Me`: the admin tab is the one thing
+  // out here that depends on it, and Settings fetches its own copy anyway.
+  const [role, setRole] = useState<Role | null>(null);
   const [tab, setTab] = useState<Tab>("home");
   const [activeWorkout, setActiveWorkout] = useState<Workout | null>(null);
   const [libraryRefreshKey, setLibraryRefreshKey] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
+  // Read once, at mount: the gate clears the token from the URL as it works,
+  // so re-reading `location` later would say there's nothing pending.
+  const [authLink, setAuthLink] = useState(hasPendingAuthLink);
 
-  if (!unlocked) {
-    return <PasscodeGate onUnlocked={() => setUnlocked(true)} />;
+  // Shared by the startup check and the sign-in callback, so a fresh sign-in
+  // picks up the role too — keying an effect on `signedIn` instead would
+  // re-fetch on the transition it just caused.
+  const loadMe = useCallback(async () => {
+    try {
+      const me = await getMe();
+      setRole(me.role);
+      setSignedIn(true);
+    } catch {
+      setRole(null);
+      setSignedIn(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadMe();
+  }, [loadMe]);
+
+  if (signedIn === null) {
+    return <div className="passcode-gate" />;
+  }
+  // An emailed link wins over an existing session: arriving at one is a
+  // deliberate act, and the alternative is dropping it on the floor.
+  if (!signedIn || authLink) {
+    return (
+      <AuthGate
+        onSignedIn={() => {
+          setAuthLink(false);
+          void loadMe();
+        }}
+      />
+    );
   }
 
   function handleSaved(workout: Workout) {
@@ -57,6 +99,9 @@ function App() {
     { id: "library", label: "Library" },
     ...(activeWorkout ? [{ id: "timer" as Tab, label: "Timer" }] : []),
     { id: "settings", label: "Settings" },
+    // The endpoints behind this 404 for everyone else, so a visible tab that
+    // always failed would read as a bug rather than as a closed door.
+    ...(role === "admin" ? [{ id: "admin" as Tab, label: "Admin" }] : []),
   ];
 
   return (
@@ -94,10 +139,12 @@ function App() {
             onClick={() => {
               logout();
               setMenuOpen(false);
-              setUnlocked(false);
+              setRole(null);
+              setTab("home");
+              setSignedIn(false);
             }}
           >
-            Lock
+            Sign out
           </button>
         </div>
       </header>
@@ -132,6 +179,7 @@ function App() {
         )}
         {tab === "timer" && activeWorkout && <TimerView workout={activeWorkout} />}
         {tab === "settings" && <Settings />}
+        {tab === "admin" && role === "admin" && <Admin />}
       </main>
     </div>
   );

@@ -19,11 +19,11 @@ import asyncio
 import json
 from pathlib import Path
 
-from short_timer.llm import WorkoutParseError, parse_workout_text
+from shortimer.service.llm import WorkoutParseError, parse_workout_text
 
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURES_PATH = ROOT / "tests" / "fixtures" / "workouts.json"
-SEED_PATH = ROOT / "src" / "short_timer" / "data" / "benchmark_wods.json"
+SEED_PATH = ROOT / "shortimer" / "data" / "benchmark_wods.json"
 
 # "custom" entries are illustrative examples, not real named benchmarks.
 # The named WODs are one uniform class — we deliberately don't split them by
@@ -36,7 +36,7 @@ DROPPED_FIELDS = ("id", "created_at", "updated_at", "source_hash")
 
 
 async def build() -> list[dict]:
-    fixtures = json.loads(FIXTURES_PATH.read_text())
+    fixtures: list[dict] = json.loads(FIXTURES_PATH.read_text())
     selected = [f for f in fixtures if f.get("category") in SEED_CATEGORIES]
     print(f"Parsing {len(selected)} benchmark workouts…")
 

@@ -23,7 +23,7 @@ export LOCATION=eastus
 export ENVIRONMENT=shortimer-env
 export APP=shortimer-api
 export API_HOST=api.shortimer.com
-export IMAGE=ghcr.io/devdupont/short-timer/api:latest
+export IMAGE=ghcr.io/devdupont/shortimer/api:latest
 
 az login
 az account set --subscription "<your-subscription-id>"
@@ -71,21 +71,29 @@ az containerapp secret set \
   --secrets \
     mongodb-uri="mongodb+srv://<user>:<password>@<cluster>/?retryWrites=true&w=majority" \
     anthropic-api-key="<your key>" \
-    session-secret="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" \
-    app-passcode="<the shared passcode>"
+    postmark-server-token="<from Postmark's Server API Tokens tab>"
 
 az containerapp update \
   --name "$APP" --resource-group "$RG" \
   --set-env-vars \
     MONGODB_URI=secretref:mongodb-uri \
     ANTHROPIC_API_KEY=secretref:anthropic-api-key \
-    SESSION_SECRET=secretref:session-secret \
-    APP_PASSCODE=secretref:app-passcode \
-    MONGODB_DB_NAME=short_timer \
+    POSTMARK_SERVER_TOKEN=secretref:postmark-server-token \
+    EMAIL_ENABLED=true \
+    EMAIL_FROM="shortimer <no-reply@send.shortimer.com>" \
+    PUBLIC_BASE_URL=https://shortimer.com \
+    WEBAUTHN_RP_ID=shortimer.com \
+    WEBAUTHN_ORIGINS=https://shortimer.com \
+    MONGODB_DB_NAME=shortimer \
     SESSION_COOKIE_SECURE=true \
     CORS_ORIGINS=https://shortimer.com \
     TRUSTED_PROXY_HOPS=1
 ```
+
+`WEBAUTHN_RP_ID` is **permanent**. It's hashed into every passkey at creation,
+so changing it invalidates all of them. It must be the apex `shortimer.com`,
+not `api.shortimer.com`: a credential registered at the apex works from any
+subdomain, while the reverse never works.
 
 `TRUSTED_PROXY_HOPS=1` is load-bearing. Container Apps' ingress *appends* to
 `X-Forwarded-For`, so anything the caller sends arrives to the left of the
@@ -109,7 +117,7 @@ properties:
   template:
     containers:
       - name: shortimer-api
-        image: ghcr.io/devdupont/short-timer/api:latest
+        image: ghcr.io/devdupont/shortimer/api:latest
         probes:
           - type: Liveness
             httpGet: { path: /api/health, port: 8000 }
@@ -182,7 +190,7 @@ az role assignment create \
 az ad app federated-credential create --id "$APP_ID" --parameters '{
   "name": "github-main",
   "issuer": "https://token.actions.githubusercontent.com",
-  "subject": "repo:devdupont/short-timer:ref:refs/heads/main",
+  "subject": "repo:devdupont/shortimer:ref:refs/heads/main",
   "audiences": ["api://AzureADTokenExchange"]
 }'
 ```
@@ -196,7 +204,7 @@ opaque login failure. If you later want an approval gate, add
 az ad app federated-credential create --id "$APP_ID" --parameters '{
   "name": "github-production-env",
   "issuer": "https://token.actions.githubusercontent.com",
-  "subject": "repo:devdupont/short-timer:environment:production",
+  "subject": "repo:devdupont/shortimer:environment:production",
   "audiences": ["api://AzureADTokenExchange"]
 }'
 ```

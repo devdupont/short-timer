@@ -1,4 +1,4 @@
-# short-timer
+# shortimer
 
 A programmable workout timer. Paste a workout from anywhere (or build one by
 hand), and the server uses an LLM to turn it into a structured, runnable
@@ -8,7 +8,7 @@ drive.
 ## Layout
 
 ```
-src/short_timer/       FastAPI server, MongoDB models, LLM parser, MCP server
+shortimer/             FastAPI server, MongoDB models, LLM parser, MCP server
 web/                   React + Vite + TypeScript frontend
 tests/                 pytest suite, including fixtures/workouts.json (a
                         curated benchmark-WOD library — Murph, Fran, Cindy, ...)
@@ -31,7 +31,7 @@ of announcing a movement nobody performs. `interval_clock` says which way the
 clock runs *inside* a leg: down by default (how long you have left to finish
 the minute), or up for sets scored by their finish time ("Every 3:00 x 5 sets,
 score = slowest set"), where athletes finish at different moments and each
-needs to read their own split. See `src/short_timer/models.py`.
+needs to read their own split. See `shortimer/models.py`.
 
 `web/src/timerPlan.ts` turns that shape into the plan the clock runs, and the
 visualizer (`WorkoutTimeline`) draws the same plan to scale — colour-coded by
@@ -41,7 +41,9 @@ the builder without starting a timer to find it.
 ## Requirements
 
 - Python 3.14 (`uv python install 3.14` if you don't have it)
-- Node 20+ for the frontend
+- Node 24 for the frontend (`nvm use` reads `.nvmrc`), which is what CI builds
+  with. Vite 8 needs at least 20.19 or 22.12 — below that it warns on every
+  build, and jsdom (which the frontend tests run in) fails to load outright.
 - A MongoDB instance (`docker compose up -d mongo` works for local dev)
 - An [Anthropic API key](https://console.anthropic.com/) for the LLM parser
 
@@ -49,12 +51,20 @@ the builder without starting a timer to find it.
 
 ```bash
 uv sync                       # installs the default + dev dependency groups
-cp .env.example .env          # fill in APP_PASSCODE, SESSION_SECRET, ANTHROPIC_API_KEY
+cp .env.example .env          # fill in ANTHROPIC_API_KEY; the rest have defaults
 docker compose up -d mongo    # or point MONGODB_URI at your own instance
 hatch run serve               # http://localhost:8000, auto-reloading
 ```
 
-Generate a session secret with `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+Registration is invite-only, and invites come from admins, so create the first
+account directly:
+
+```bash
+hatch run python scripts/create_admin.py you@example.com
+```
+
+Outbound email is off by default, so verification and reset links are written
+to the log rather than sent — the whole signup flow works with no provider.
 
 ### Tests and linting
 
@@ -62,7 +72,7 @@ Generate a session secret with `python -c "import secrets; print(secrets.token_u
 hatch run test         # pytest — mocks Mongo and the Anthropic API, no network needed
 hatch check code       # ruff lint      (add --fix to apply)
 hatch check fmt        # ruff format    (add --fix to apply)
-hatch run types        # mypy --strict over src/
+hatch run types        # mypy
 ```
 
 All four should pass before a change lands. `hatch fmt` still works but is
@@ -116,12 +126,12 @@ Exposes: `parse_workout` (authoring — run pasted text through the LLM
 parser), `create_timer_workout` (authoring — save a structured workout
 directly), and `search_workouts` / `get_workout` (library — read from the
 same MongoDB collection the web app uses). See
-`src/short_timer/mcp_server.py`.
+`shortimer/mcp_server.py`.
 
 It reads and writes one owner's library. Having no session to derive that
-from, it takes the owner from `MCP_OWNER_ID`, which defaults to the user the
-shared passcode logs everyone in as — so it needs setting only once there are
-real accounts.
+from, it authenticates with a per-user API token in `MCP_API_TOKEN` — mint one
+under Settings → API tokens. The owner and the allowed operations both come
+from the token, and it can be revoked without touching the account.
 
 ## Frontend setup
 
@@ -137,11 +147,15 @@ runs oxlint.
 
 ## Auth
 
-There's no user model yet — just a single shared passcode (`APP_PASSCODE`).
-Logging in gets you a signed, HttpOnly session cookie; every `/api/workouts*`
-route requires it. Swap in real accounts later without touching the rest of
-the app, since routes only depend on the `require_session` dependency, not
-on any notion of a user.
+Email and password, with invite-only registration. Passwords hash with Argon2id;
+sessions live in the database, so they can actually be revoked. Roles (`user`,
+`staff`, `admin`) gate the privileged surfaces.
+
+Every owner-scoped route depends on `current_owner`, which is the single place
+tenancy is decided — routes never read the session themselves.
+
+See [docs/accounts.md](docs/accounts.md) for the reasoning, the DNS the email
+needs, and what's still open.
 
 ## Note on Python 3.14
 

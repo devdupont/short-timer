@@ -31,8 +31,9 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          # Vite 8 / rolldown needs >= 22.12.
-          node-version: "24"
+          # From `.nvmrc`, so CI and local can't drift apart. Vite 8 / rolldown
+          # needs >= 22.12, and jsdom won't load below it either.
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: web/package-lock.json
 
@@ -40,9 +41,11 @@ jobs:
 
       - run: npm run lint
 
-      # `timerPlan.ts` is the one reading of a workout that both the clock and
-      # the visualizer run on, so a regression there is wrong in two places at
-      # once and visible in neither until a workout is running.
+      # The whole frontend suite: pure logic, hooks, and components. The
+      # oldest part of it still earns its place first — `timerPlan.ts` is the
+      # one reading of a workout that both the clock and the visualizer run
+      # on, so a regression there is wrong in two places at once and visible
+      # in neither until a workout is running.
       - run: npm test
 
       # Vite inlines env vars at build time, so this is baked into the bundle
@@ -52,6 +55,13 @@ jobs:
       - run: npm run build
         env:
           VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+
+      # Pages serves static files and has no SPA fallback, so /register,
+      # /verify and /reset — the three addresses we *email people* — would
+      # each return the 404 page. Pages does serve 404.html for anything it
+      # can't match, so a copy of the app there makes those links load the app,
+      # which then reads the path and token off the URL itself.
+      - run: cp dist/index.html dist/404.html
 
       - uses: actions/upload-pages-artifact@v3
         with:

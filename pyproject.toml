@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "short-timer"
+name = "shortimer"
 version = "0.1.0"
 description = "A programmable workout timer server: paste in a workout, get back a runnable timer."
 readme = "README.md"
@@ -13,16 +13,28 @@ authors = [{ name = "Michael Dupont" }]
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.34",
-    "pydantic>=2.9",
+    # The `email` extra pulls in email-validator, which backs `EmailStr` on
+    # the register and invite payloads.
+    "pydantic[email]>=2.9",
     "pydantic-settings>=2.6",
-    "pymongo>=4.9",
+    # Beanie caps Python below 3.14 as of 2.2.0 — this repo doesn't run on
+    # 3.14 yet either (only ruff's target-version aspirationally names it),
+    # so this isn't a new constraint in practice. Revisit the ruff target
+    # once Beanie lifts the cap.
+    "beanie>=2.2,<3",
+    "pymongo>=4.11,!=4.15.0",
     # Resolves mongodb+srv:// URIs (MongoDB Atlas). Current pymongo requires it
     # anyway, but the deployment depends on it, so declare it explicitly.
     "dnspython>=2.6",
     "anthropic>=0.40",
-    "itsdangerous>=2.2",
+    # Argon2id password hashing (see passwords.py). Not passlib, whose last
+    # release was 2020, and not bcrypt, which silently truncates at 72 bytes.
+    "argon2-cffi>=25.1",
     # Encrypts per-user third-party credentials at rest (see crypto.py).
     "cryptography>=43",
+    # Server side of the WebAuthn ceremonies behind passkeys (see passkeys.py).
+    # 3.x verifies post-quantum ML-DSA credentials and prefers EdDSA keypairs.
+    "webauthn>=3,<4",
     # 2.x: `mcp.server.fastmcp.FastMCP` became `mcp.server.mcpserver.MCPServer`,
     # which mcp_server.py now uses. Capped below 3 so the next major can't
     # arrive unannounced the way 2.0 did — the API this depends on is a class
@@ -36,11 +48,11 @@ dependencies = [
 ]
 
 [project.scripts]
-short-timer-server = "short_timer.app:run"
-short-timer-mcp = "short_timer.mcp_server:run"
+shortimer-server = "shortimer.app:run"
+shortimer-mcp = "shortimer.mcp_server:run"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/short_timer"]
+packages = ["shortimer"]
 
 # Dev dependencies live here rather than in the hatch env so that uv locks
 # them: CI installs the locked set (`uv sync --frozen`), which is the only way
@@ -62,9 +74,9 @@ dependency-groups = ["dev"]
 
 [tool.hatch.envs.default.scripts]
 test = "pytest {args:tests}"
-types = "mypy {args:src}"
-serve = "uvicorn short_timer.app:app --reload {args}"
-mcp = "python -m short_timer.mcp_server {args}"
+types = "mypy {args:shortimer tests}"
+serve = "uvicorn shortimer.app:app --reload {args}"
+mcp = "python -m shortimer.mcp_server {args}"
 scrape = "python scripts/scrape_workouts.py {args}"
 seed-data = "python scripts/build_benchmark_seed.py {args}"
 
@@ -72,12 +84,34 @@ seed-data = "python scripts/build_benchmark_seed.py {args}"
 plugins = ["pydantic.mypy"]
 python_version = "3.12"
 strict = true
-files = ["src"]
+files = ["shortimer"]
+# Test modules do `from conftest import ...` (pytest resolves this via its own
+# `pythonpath` ini setting); mypy needs the same directory on its own search
+# path to resolve those imports when it type-checks tests/ too.
+mypy_path = ["tests"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# The suite is organized into per-submodule directories (tests/auth,
+# tests/router, ...) without __init__.py files. Two things follow from that:
+#
+# - `from conftest import ...` (used for shared constants like TEST_EMAIL)
+#   needs `tests/` on sys.path regardless of how deep a test file is nested.
+# - The default "prepend" import mode would *also* put each test file's own
+#   directory on sys.path — ahead of the entry above — so a subdirectory's
+#   own conftest.py (e.g. tests/router/conftest.py) would shadow the shared
+#   one for that bare import. "importlib" mode imports test files without
+#   touching sys.path at all, so only the entry below is ever in play.
+addopts = ["--import-mode=importlib"]
+pythonpath = ["tests"]
 markers = ["live: hits the real Anthropic API; needs a real ANTHROPIC_API_KEY"]
+# mongomock calls the deprecated datetime.utcnow() internally, once per index
+# operation — and every test now builds the indexes, so this drowns out our own
+# warnings. Scoped to that module so a deprecation in *our* code still shows.
+filterwarnings = [
+    "ignore:datetime.datetime.utcnow\\(\\) is deprecated:DeprecationWarning:mongomock.helpers",
+]
 
 [tool.ruff]
 target-version = "py314"
@@ -88,4 +122,4 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 ignore = ["E501"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["short_timer"]
+known-first-party = ["shortimer"]

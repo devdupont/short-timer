@@ -7,7 +7,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "src/**"
+      - "shortimer/**"
       - "pyproject.toml"
       - "uv.lock"
       - "Dockerfile"
@@ -43,7 +43,7 @@ jobs:
       # No external services needed: Mongo is mocked and Anthropic is never called.
       - run: uv sync --frozen
       - run: uv run pytest tests
-      - run: uv run mypy src
+      - run: uv run mypy shortimer
 
   deploy:
     name: Build and deploy
