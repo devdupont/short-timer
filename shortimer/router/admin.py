@@ -53,7 +53,7 @@ async def create_invite(body: InviteCreateRequest, admin: Admin) -> InviteCreate
     token, invite = await invites.create_invite(
         created_by=admin.id, email=body.email, role=body.role
     )
-    link = f"{get_settings().public_base_url.rstrip('/')}/register?token={token}"
+    link = invites.invite_link(token)
 
     emailed = False
     if invite.email is not None:

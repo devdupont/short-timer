@@ -58,6 +58,18 @@ async def create_invite(
     return token, invite
 
 
+def invite_link(token: str) -> str:
+    """The URL whoever holds `token` opens to register.
+
+    Built against `public_base_url`: the token is redeemed on the register
+    *screen*, and this API serves no HTML. Lives here rather than at the one
+    call site because the admin endpoint and `scripts/create_invite.py` both
+    hand this link to a person, and two spellings of it would eventually
+    disagree.
+    """
+    return f"{get_settings().public_base_url.rstrip('/')}/register?token={token}"
+
+
 async def find_invite(token: str) -> Invite | None:
     """The invite a token names, valid or not. Callers decide what to do."""
     doc = await Invite.get_pymongo_collection().find_one({"token_hash": hash_token(token)})

@@ -76,7 +76,7 @@ export function WorkoutImport({
             onClick={handleParse}
             disabled={loading || !text.trim()}
           >
-            {loading ? "Parsing…" : "Parse with LLM"}
+            {loading ? "Crunching…" : "Crunch"}
           </button>
           {error && <span className="error">{error}</span>}
         </div>

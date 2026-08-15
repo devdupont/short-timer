@@ -63,6 +63,17 @@ account directly:
 hatch run python scripts/create_admin.py you@example.com
 ```
 
+Invites are normally minted from the admin screen, but the same thing works
+from the shell — useful when nobody can sign in as an admin:
+
+```bash
+hatch run python scripts/create_invite.py friend@example.com
+```
+
+It prints the register link, which is the only copy of the token; add `--role
+admin` for an invite that creates another admin. Omit the address for an open
+code anyone holding the link may redeem.
+
 Outbound email is off by default, so verification and reset links are written
 to the log rather than sent — the whole signup flow works with no provider.
 

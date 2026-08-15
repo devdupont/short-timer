@@ -55,7 +55,7 @@ describe("parsing", () => {
   it("will not parse an empty box", () => {
     render(<WorkoutImport onSaved={onSaved} onLoad={onLoad} />);
 
-    expect(screen.getByRole("button", { name: "Parse with LLM" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Crunch" })).toBeDisabled();
   });
 
   it("will not parse whitespace either", async () => {
@@ -65,13 +65,13 @@ describe("parsing", () => {
 
     await user.type(screen.getByRole("textbox"), "   ");
 
-    expect(screen.getByRole("button", { name: "Parse with LLM" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Crunch" })).toBeDisabled();
   });
 
   it("sends the pasted text to the parser", async () => {
     const user = await paste("Fran\n21-15-9");
 
-    await user.click(screen.getByRole("button", { name: "Parse with LLM" }));
+    await user.click(screen.getByRole("button", { name: "Crunch" }));
 
     expect(api.parseWorkout).toHaveBeenCalledWith("Fran\n21-15-9");
   });
@@ -79,7 +79,7 @@ describe("parsing", () => {
   it("shows what came back before anything is saved", async () => {
     const user = await paste();
 
-    await user.click(screen.getByRole("button", { name: "Parse with LLM" }));
+    await user.click(screen.getByRole("button", { name: "Crunch" }));
 
     expect(await screen.findByText("Fran")).toBeInTheDocument();
     expect(screen.getByText("For Time")).toBeInTheDocument();
@@ -91,7 +91,7 @@ describe("parsing", () => {
     api.parseWorkout.mockRejectedValue(new Error("model down"));
     const user = await paste();
 
-    await user.click(screen.getByRole("button", { name: "Parse with LLM" }));
+    await user.click(screen.getByRole("button", { name: "Crunch" }));
 
     expect(await screen.findByText("Could not parse that workout.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save to library" })).not.toBeInTheDocument();
@@ -101,11 +101,11 @@ describe("parsing", () => {
     // Otherwise a failed second parse leaves the first result on screen, and
     // the buttons under it would save something the text no longer says.
     const user = await paste();
-    await user.click(screen.getByRole("button", { name: "Parse with LLM" }));
+    await user.click(screen.getByRole("button", { name: "Crunch" }));
     await screen.findByText("Fran");
 
     api.parseWorkout.mockRejectedValue(new Error("model down"));
-    await user.click(screen.getByRole("button", { name: "Parse with LLM" }));
+    await user.click(screen.getByRole("button", { name: "Crunch" }));
 
     await waitFor(() => expect(screen.queryByText("Fran")).not.toBeInTheDocument());
   });
@@ -116,7 +116,7 @@ describe("what to do with the result", () => {
     // The saved copy carries the id the library and timer need; the preview
     // doesn't have one yet.
     const user = await paste();
-    await user.click(screen.getByRole("button", { name: "Parse with LLM" }));
+    await user.click(screen.getByRole("button", { name: "Crunch" }));
     await user.click(await screen.findByRole("button", { name: "Save to library" }));
 
     await waitFor(() => expect(api.createWorkout).toHaveBeenCalledWith(FRAN));
@@ -125,7 +125,7 @@ describe("what to do with the result", () => {
 
   it("empties the box once it has been saved", async () => {
     const user = await paste();
-    await user.click(screen.getByRole("button", { name: "Parse with LLM" }));
+    await user.click(screen.getByRole("button", { name: "Crunch" }));
     await user.click(await screen.findByRole("button", { name: "Save to library" }));
 
     await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue(""));
@@ -135,7 +135,7 @@ describe("what to do with the result", () => {
   it("loads without saving, leaving the library alone", async () => {
     // For trying a one-off: the timer runs it, nothing is written down.
     const user = await paste();
-    await user.click(screen.getByRole("button", { name: "Parse with LLM" }));
+    await user.click(screen.getByRole("button", { name: "Crunch" }));
     await user.click(await screen.findByRole("button", { name: "Load without saving" }));
 
     expect(onLoad).toHaveBeenCalledWith(FRAN);
@@ -147,7 +147,7 @@ describe("what to do with the result", () => {
     // still savable.
     api.createWorkout.mockRejectedValue(new Error("nope"));
     const user = await paste();
-    await user.click(screen.getByRole("button", { name: "Parse with LLM" }));
+    await user.click(screen.getByRole("button", { name: "Crunch" }));
     await user.click(await screen.findByRole("button", { name: "Save to library" }));
 
     expect(await screen.findByText("Could not save that workout.")).toBeInTheDocument();
